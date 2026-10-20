@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="upos_entries">
+        <item>不取代</item>
+        <item>ali（阿里）</item>
+        <item>alib（阿里）</item>
+        <item>alio1（阿里）</item>
+        <item>bos（百度）</item>
+        <item>cos（騰訊）</item>
+        <item>cosb（騰訊）</item>
+        <item>coso1（騰訊）</item>
+        <item>hw（華為）</item>
+        <item>hwb（華為）</item>
+        <item>hwo1（華為）</item>
+        <item>08c（華為）</item>
+        <item>08h（華為）</item>
+        <item>08ct（華為）</item>
+        <item>tf_hw（華為）</item>
+        <item>tf_tx（騰訊）</item>
+        <item>akamai（Akamai海外）</item>
+        <item>aliov（阿里海外）</item>
+        <item>cosov（騰訊海外）</item>
+        <item>hwov（華為海外）</item>
+        <item>hk_bcache（Bilibili海外）</item>
+    </string-array>
+
+    <string-array name="tab_entries">
+        <item>直播</item>
+        <item>推薦</item>
+        <item>熱門</item>
+        <item>番劇（動畫）</item>
+        <item>影視</item>
+        <item>韓綜</item>
+        <item>其它</item>
+    </string-array>
+
+    <string-array name="home_recommend_entries">
+        <item>廣告（含推廣）</item>
+        <item>遊戲</item>
+        <item>橫幅（輪播圖）</item>
+        <item>通知（追番更新、活動提示）</item>
+        <item>文章</item>
+        <item>動態</item>
+        <item>豎版影片</item>
+        <item>直播</item>
+        <item>內聯影片</item>
+        <item>番劇、電影、電視劇、紀錄片……</item>
+        <item>大卡（單列顯示的）</item>
+        <item>中卡</item>
+        <item>小卡（雙列顯示的）</item>
+    </string-array>
+
+    <string-array name="space_entries">
+        <item>分頁：首頁</item>
+        <item>分頁：動態</item>
+        <item>分頁：投稿</item>
+        <item>分頁：商品</item>
+        <item>分頁：追番</item>
+        <item>分頁：課堂</item>
+        <item>直播</item>
+        <item>充電</item>
+        <item>大航海</item>
+        <item>推廣櫥窗</item>
+        <item>影片</item>
+        <item>專欄</item>
+        <item>音訊</item>
+        <item>最近追番</item>
+        <item>最近投幣</item>
+        <item>最近按讚</item>
+        <item>最近追漫</item>
+        <item>玩的遊戲</item>
+        <item>課堂</item>
+        <item>粉絲裝扮</item>
+        <item>收藏夾</item>
+        <item>漫畫</item>
+        <item>合集</item>
+        <item>數字藏品展現</item>
+        <item>NFT大頭貼</item>
+    </string-array>
+
+    <string-array name="block_video_ad">
+        <item>UP主推薦廣告</item>
+        <item>相關遊戲</item>
+    </string-array>
+
+    <string-array name="dynamic_entries">
+        <item>轉發</item>
+        <item>投稿影片</item>
+        <item>番劇、電影等</item>
+        <item>付費內容 1</item>
+        <item>付費內容 2</item>
+        <item>摺疊</item>
+        <item>文字</item>
+        <item>圖文</item>
+        <item>文章</item>
+        <item>音訊</item>
+        <item>通用 方形</item>
+        <item>通用 豎形</item>
+        <item>直播</item>
+        <item>播放列表</item>
+        <item>廣告</item>
+        <item>小程式</item>
+        <item>訂閱</item>
+        <item>新訂閱</item>
+        <item>直播推薦</item>
+        <item>橫幅</item>
+        <item>合集</item>
+        <item>故事</item>
+        <item>話題推薦</item>
+        <item>付費更新</item>
+        <item>話題集合</item>
+        <item>通知</item>
+    </string-array>
+    <string-array name="live_popup_entries">
+        <item>購物卡片</item>
+        <item>購物精選</item>
+        <item>關注提醒</item>
+        <item>直播預約</item>
+        <item>投餵支持</item>
+        <item>滾動橫幅</item>
+        <item>電池任務</item>
+        <item>正在去買</item>
+    </string-array>
+    <string-array name="half_screen_quality_entries">
+        <item>預設</item>
+        <item>跟隨全螢幕解析度</item>
+        <item>240P</item>
+        <item>360P</item>
+        <item>480P</item>
+        <item>720P</item>
+        <item>720P 60幀</item>
+        <item>1080P</item>
+        <item>1080P 高碼率</item>
+        <item>1080P 60幀</item>
+        <item>4K</item>
+        <item>8K</item>
+    </string-array>
+    <string-array name="full_screen_quality_entries">
+        <item>預設</item>
+        <item>240P</item>
+        <item>360P</item>
+        <item>480P</item>
+        <item>720P</item>
+        <item>720P 60幀</item>
+        <item>1080P</item>
+        <item>1080P 高碼率</item>
+        <item>1080P 60幀</item>
+        <item>4K</item>
+        <item>8K</item>
+    </string-array>
+    <string-array name="pegasus_cover_ratio_entries">
+        <item>預設（使用雲控值）</item>
+        <item>16:9</item>
+        <item>4:3</item>
+    </string-array>
+</resources>

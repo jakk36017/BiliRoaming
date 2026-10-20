@@ -1,0 +1,480 @@
+package me.iacn.biliroaming.utils
+
+import android.annotation.SuppressLint
+import android.app.AndroidAppHelper
+import android.content.Context
+import android.content.SharedPreferences
+import android.content.pm.PackageManager.GET_META_DATA
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.util.TypedValue
+import android.view.*
+import android.widget.ListView
+import androidx.annotation.LayoutRes
+import androidx.annotation.RequiresApi
+import androidx.documentfile.provider.DocumentFile
+import com.google.protobuf.GeneratedMessageLite
+import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
+import me.iacn.biliroaming.Constant
+import me.iacn.biliroaming.XposedInit
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.lang.ref.WeakReference
+import java.lang.reflect.Field
+import java.lang.reflect.Proxy
+import java.math.BigInteger
+import java.net.URL
+import java.util.*
+import java.util.function.Consumer
+import kotlin.math.roundToInt
+import kotlin.reflect.KProperty
+
+class Weak<T>(val initializer: () -> T?) {
+    private var weakReference: WeakReference<T?>? = null
+
+    operator fun getValue(thisRef: Any?, property: KProperty<*>) = weakReference?.get() ?: let {
+        weakReference = WeakReference(initializer())
+        weakReference
+    }?.get()
+
+    operator fun setValue(thisRef: Any?, property: KProperty<*>, value: T?) {
+        weakReference = WeakReference(value)
+    }
+}
+
+val systemContext: Context
+    get() {
+        val activityThread = "android.app.ActivityThread".findClassOrNull(null)
+            ?.callStaticMethod("currentActivityThread")!!
+        return activityThread.callMethodAs("getSystemContext")
+    }
+
+// https://socialsisteryi.github.io/bilibili-API-collect/docs/misc/bvid_desc.html#bv-av%E7%AE%97%E6%B3%95
+fun bv2av(bv: String): Long {
+    val table = HashMap<Char, Int>()
+    "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf".forEachIndexed { i, b ->
+        table[b] = i
+    }
+    val r = intArrayOf(11, 10, 3, 8, 4, 6, 5, 7, 9).withIndex().sumOf { (i, p) ->
+        table[bv[p]]!! * BigInteger.valueOf(58).pow(i).toLong()
+    }
+    return r.and(2251799813685247L).xor(23442827791579L)
+}
+
+fun av2bv(aid: Long): String {
+    val s = CharArray(12) { if (it < 3) "BV1"[it] else '0' }
+    var t = ((1L shl 51) or aid) xor 23442827791579L
+    var i = 11
+    while (t > 0) {
+        s[i--] = "FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf"[(t % 58).toInt()]
+        t /= 58
+    }
+    s[3] = s[9].also { s[9] = s[3] }
+    s[4] = s[7].also { s[7] = s[4] }
+    return String(s)
+}
+fun getPackageVersion(packageName: String) = try {
+    @Suppress("DEPRECATION")
+    systemContext.packageManager.getPackageInfo(packageName, 0).run {
+        String.format("${packageName}@%s(%s)", versionName, getVersionCode(packageName))
+    }
+} catch (e: Throwable) {
+    Log.e(e)
+    "(unknown)"
+}
+
+
+fun getVersionCode(packageName: String) = try {
+    @Suppress("DEPRECATION")
+    systemContext.packageManager.getPackageInfo(packageName, 0).versionCode
+} catch (e: Throwable) {
+    Log.e(e)
+    null
+} ?: 6080000
+
+
+val appKeyMap = mapOf(
+    "tv.danmaku.bili" to "1d8b6e7d45233436",
+    "com.bilibili.app.blue" to "07da50c9a0bf829f",
+    "com.bilibili.app.in" to "bb3101000e232e27",
+    "tv.danmaku.bilibilihd" to "dfca71928277209b",
+)
+
+val currentContext by lazy { AndroidAppHelper.currentApplication() as Context }
+
+val packageName: String by lazy { currentContext.packageName }
+
+val isBuiltIn
+    get() = XposedInit.modulePath.endsWith("so")
+
+val is64
+    get() = currentContext.applicationInfo.nativeLibraryDir.contains("64")
+
+val platform by lazy {
+    @Suppress("DEPRECATION")
+    currentContext.packageManager.getApplicationInfo(packageName, GET_META_DATA).metaData.getString(
+        "MOBI_APP"
+    )
+        ?: when (packageName) {
+            Constant.BLUE_PACKAGE_NAME -> "android_b"
+            Constant.PLAY_PACKAGE_NAME -> "android_i"
+            Constant.HD_PACKAGE_NAME -> "android_hd"
+            else -> "android"
+        }
+}
+
+val logFile by lazy { File(currentContext.externalCacheDir, "log.txt") }
+
+val oldLogFile by lazy { File(currentContext.externalCacheDir, "old_log.txt") }
+
+@Suppress("DEPRECATION")
+val sPrefs: SharedPreferences
+    get() = currentContext.getSharedPreferences("biliroaming", Context.MODE_MULTI_PROCESS)
+
+@Suppress("DEPRECATION")
+val sCaches: SharedPreferences
+    get() = currentContext.getSharedPreferences("biliroaming_cache", Context.MODE_MULTI_PROCESS)
+
+@Suppress("DEPRECATION")
+val biliPrefs: SharedPreferences
+    get() = currentContext.getSharedPreferences("bili_preference", Context.MODE_MULTI_PROCESS)
+
+val blkvPrefs: SharedPreferences
+    get() = instance.biliGlobalPreferenceClass?.callStaticMethodAs(instance.getBLKVPrefs())
+        ?: biliPrefs
+
+fun checkErrorToast(json: JSONObject, isCustomServer: Boolean = false) {
+    if (json.optInt("code", 0) != 0) {
+        Log.toast(
+            (if (isCustomServer) "请求解析服务器发生错误: " else "请求发生错误: ") + json.optString(
+                "message",
+                "未知错误"
+            )
+        )
+    }
+}
+
+fun signQuery(query: String?, extraMap: Map<String, String> = emptyMap()): String? {
+    query ?: return null
+    val queryMap = query.split('&')
+        .map { it.split('=', limit = 2) }
+        .filter { it.size == 2 }
+        .associate { Pair(it[0], it[1]) }
+    return signQuery(queryMap, extraMap)
+}
+
+fun signQuery(query: Map<String, String>, extraMap: Map<String, String> = emptyMap()): String {
+    val queryMap = TreeMap<String, String>()
+    queryMap.putAll(query)
+    val packageName = AndroidAppHelper.currentPackageName()
+    queryMap["appkey"] = instance.appKey
+    queryMap["build"] = getVersionCode(packageName).toString()
+    queryMap["device"] = "android"
+    queryMap["mobi_app"] = platform
+    queryMap["platform"] = "android"
+    queryMap.putAll(extraMap)
+    queryMap.remove("ts")
+    queryMap.remove("sign")
+    return instance.libBiliClass?.callStaticMethod(instance.signQueryName(), queryMap).toString()
+}
+
+@SuppressLint("DiscouragedApi")
+fun getId(name: String) = instance.ids[name]
+    ?: currentContext.resources.getIdentifier(name, "id", currentContext.packageName)
+
+@SuppressLint("DiscouragedApi")
+fun getResId(name: String, type: String) =
+    currentContext.resources.getIdentifier(name, type, currentContext.packageName)
+
+fun getBitmapFromURL(src: String?, callback: (Bitmap?) -> Unit) {
+    Thread {
+        callback(try {
+            src?.let {
+                val bytes = URL(it).readBytes()
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        } catch (e: IOException) {
+            Log.e(e)
+            null
+        })
+    }.start()
+}
+
+fun String?.toJSONObject() = JSONObject(this.orEmpty())
+
+@Suppress("UNCHECKED_CAST")
+fun <T> JSONArray.asSequence() = (0 until length()).asSequence().map { get(it) as T }
+
+operator fun JSONArray.iterator(): Iterator<JSONObject> =
+    (0 until length()).asSequence().map { get(it) as JSONObject }.iterator()
+
+fun JSONArray?.orEmpty() = this ?: JSONArray()
+
+fun getStreamContent(input: InputStream) = try {
+    input.bufferedReader().use {
+        it.readText()
+    }
+} catch (e: Throwable) {
+    Log.e(e)
+    null
+}
+
+/**
+ * @param targetDir 目标文件夹
+ */
+fun DocumentFile.copyTo(targetDir: DocumentFile) {
+    val name = name ?: return
+    if (isDirectory) {
+        val chile = targetDir.findOrCreateDir(name) ?: return
+        listFiles().forEach {
+            it.copyTo(chile)
+        }
+    } else if (isFile) {
+        val type = type ?: return
+        val targetFile = targetDir.createFile(type, name) ?: return
+        currentContext.contentResolver.openInputStream(uri)?.use {
+            currentContext.contentResolver.openOutputStream(targetFile.uri)
+                ?.use { o -> it.copyTo(o) }
+        }
+    }
+}
+
+fun DocumentFile.findOrCreateDir(displayName: String) = this.findFile(displayName)
+    ?: this.createDirectory(displayName)
+
+val shouldSaveLog
+    get() = sPrefs.getBoolean("save_log", false) || sPrefs.getBoolean("show_hint", true)
+
+fun GeneratedMessageLite<*, *>.print(indent: Int = 0): String {
+    val sb = StringBuilder()
+    for (f in javaClass.declaredFields) {
+        if (f.name.startsWith("bitField")) continue
+        if (f.isStatic) continue
+        f.isAccessible = true
+        val v = f.get(this)
+        val name = StringBuffer().run {
+            for (i in 0 until indent) append('\t')
+            append(f.name.substringBeforeLast("_"), ": ")
+            toString()
+        }
+        when (v) {
+            is GeneratedMessageLite<*, *> -> {
+                sb.appendLine(name)
+                sb.append(v.print(indent + 1))
+            }
+
+            is List<*> -> {
+                for (vv in v) {
+                    sb.append(name)
+                    when (vv) {
+                        is GeneratedMessageLite<*, *> -> {
+                            sb.appendLine()
+                            sb.append(vv.print(indent + 1))
+                        }
+
+                        else -> {
+                            sb.appendLine(vv?.toString() ?: "null")
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                sb.append(name)
+                sb.appendLine(v?.toString() ?: "null")
+            }
+        }
+    }
+    return sb.toString()
+}
+
+operator fun ViewGroup.iterator(): MutableIterator<View> = object : MutableIterator<View> {
+    private var index = 0
+    override fun hasNext() = index < childCount
+    override fun next() = getChildAt(index++) ?: throw IndexOutOfBoundsException()
+    override fun remove() = removeViewAt(--index)
+}
+
+val ViewGroup.children: Sequence<View>
+    get() = object : Sequence<View> {
+        override fun iterator() = this@children.iterator()
+    }
+
+fun View.setRippleBackground() = with(TypedValue()) {
+    context.theme.resolveAttribute(android.R.attr.selectableItemBackground, this, true)
+    setBackgroundResource(resourceId)
+}
+
+@SuppressLint("ApplySharedPref")
+fun migrateHomeFilterPrefsIfNeeded() {
+    if (!sPrefs.getBoolean("home_filter_prefs_migrated", false)) {
+        val titleList = sPrefs.getString("keywords_filter_title_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+        val reasonList = sPrefs.getString("keywords_filter_reason_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+        val uidList = sPrefs.getString("keywords_filter_uid_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+        val upList = sPrefs.getString("keywords_filter_upname_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+        val categoryList = sPrefs.getString("keywords_filter_rname_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+        val channelList = sPrefs.getString("keywords_filter_tname_recommend_list", null)
+            ?.split('|')?.filter { it.isNotBlank() }?.toSet()
+
+        sPrefs.edit().apply {
+            putStringSet("home_filter_keywords_title", titleList)
+            putStringSet("home_filter_keywords_reason", reasonList)
+            putStringSet("home_filter_keywords_uid", uidList)
+            putStringSet("home_filter_keywords_up", upList)
+            putStringSet("home_filter_keywords_category", categoryList)
+            putStringSet("home_filter_keywords_channel", channelList)
+            putBoolean("home_filter_prefs_migrated", true)
+        }.commit()
+    }
+}
+
+fun getRetrofitUrl(response: Any): String? {
+    val requestField = instance.requestField() ?: return null
+    val urlField = instance.urlField() ?: return null
+    val request = response.getObjectField(requestField)
+    return request?.getObjectField(urlField)?.toString()
+}
+
+fun Window.blurBackground() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+    addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+    attributes.blurBehindRadius = 50
+    setBackgroundBlurRadius(50)
+    val blurEnableListener = Consumer<Boolean> { enable: Boolean ->
+        setDimAmount(if (enable) 0.1F else 0.6F)
+    }
+    decorView.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+        @RequiresApi(Build.VERSION_CODES.S)
+        override fun onViewAttachedToWindow(v: View) {
+            windowManager.addCrossWindowBlurEnabledListener(blurEnableListener)
+        }
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        override fun onViewDetachedFromWindow(v: View) {
+            windowManager.removeCrossWindowBlurEnabledListener(blurEnableListener)
+        }
+    })
+    addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+}
+
+val Int.sp: Int
+    inline get() = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP,
+        toFloat(),
+        currentContext.resources.displayMetrics
+    ).roundToInt()
+
+val Int.dp: Int
+    inline get() = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_DIP,
+        toFloat(),
+        currentContext.resources.displayMetrics
+    ).roundToInt()
+
+@Suppress("DEPRECATION")
+val currentIsLandscape: Boolean
+    get() = currentContext.getSystemService(WindowManager::class.java)
+        .defaultDisplay.orientation.let { it == Surface.ROTATION_90 || it == Surface.ROTATION_270 }
+
+inline fun Any.mossResponseHandlerProxy(crossinline onNext: (reply: Any?) -> Unit): Any {
+    return Proxy.newProxyInstance(
+        javaClass.classLoader,
+        arrayOf(instance.mossResponseHandlerClass)
+    ) { _, m, args ->
+        if (m.name == "onNext") {
+            val reply = args[0]
+            onNext(reply)
+            m(this, *args)
+        } else if (args == null) {
+            m(this)
+        } else {
+            m(this, *args)
+        }
+    }
+}
+
+inline fun Any.mossResponseHandlerReplaceProxy(crossinline onNext: (reply: Any?) -> Any?): Any {
+    val originalHandler = this
+    return Proxy.newProxyInstance(
+        javaClass.classLoader,
+        arrayOf(instance.mossResponseHandlerClass)
+    ) { _, m, args ->
+        if (m.name == "onNext") {
+            onNext(args[0])?.let {
+                args[0] = it
+            }
+            m(this, *args)
+        } else if (m.name == "onError") {
+            val newResponse = onNext(null)
+            if (newResponse == null) {
+                m(this, *args)
+            } else {
+                originalHandler.callMethod("onNext", newResponse)
+                originalHandler.callMethod("onCompleted")
+            }
+        } else if (args == null) {
+            m(this)
+        } else {
+            m(this, *args)
+        }
+    }
+}
+
+@SuppressLint("ApplySharedPref")
+fun SharedPreferences.appendStringForSet(key: String, value: String, commit: Boolean = false) {
+    getStringSet(key, null).orEmpty().let {
+        edit().putStringSet(key, it + value).apply { if (commit) commit() else apply() }
+    }
+}
+
+fun ListView.forceSetSelection(pos: Int, top: Int = 0) {
+    // stop scrolling
+    smoothScrollBy(0, 0)
+    setSelectionFromTop(pos, top)
+}
+
+fun Context.inflateLayout(
+    @LayoutRes resource: Int,
+    root: ViewGroup? = null,
+    attachToRoot: Boolean = root != null
+): View = LayoutInflater.from(this).inflate(resource, root, attachToRoot)
+
+fun Context.addModuleAssets() {
+    resources.assets.callMethod("addAssetPath", XposedInit.modulePath)
+}
+
+@OptIn(ExperimentalStdlibApi::class)
+fun Any.dumpToString(): String {
+    val sb = StringBuilder()
+    sb.append("---- ${this.javaClass.name}@${this.hashCode().toHexString()} dump begin ----\n")
+    fun dumpClassFields(clazz: Class<*>) {
+        clazz.declaredFields.forEach { field ->
+            if (field.isStatic) return@forEach
+            field.isAccessible = true
+            val v = field.get(this)
+            sb.append("${field.name}: $v\n")
+        }
+        clazz.superclass?.let {
+            dumpClassFields(it)
+        }
+    }
+    dumpClassFields(this.javaClass)
+    sb.append("---- ${this.javaClass.name}@${this.hashCode().toHexString()} dump end ----")
+    return sb.toString()
+}
+
+fun Class<*>.findField(filter: (Field) -> Boolean): Field? {
+    return declaredFields.find { field ->
+        field.isAccessible = true
+        filter(field)
+    } ?: superclass?.findField(filter)
+}
