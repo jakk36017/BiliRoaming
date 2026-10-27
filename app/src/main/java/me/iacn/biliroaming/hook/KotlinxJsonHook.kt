@@ -7,7 +7,7 @@ import me.iacn.biliroaming.hook.kotlinx.KotlinxSplashShowProcessor
 import me.iacn.biliroaming.utils.Log
 import me.iacn.biliroaming.utils.callMethodOrNull
 import me.iacn.biliroaming.utils.getObjectFieldAs
-import me.iacn.biliroaming.utils.hookAfterAllMethods
+import me.iacn.biliroaming.utils.hookAllMethods
 
 class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private val allProcessors = listOf(
@@ -27,8 +27,10 @@ class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
         val jsonClass = instance.kotlinJsonClass ?: return
 
-        jsonClass.hookAfterAllMethods("decodeFromString") { param ->
-            dispatchResult(param.args.getOrNull(0), param.result)
+        jsonClass.hookAllMethods("decodeFromString") { chain ->
+            val result = chain.proceed()
+            dispatchResult(chain.args.getOrNull(0), result)
+            result
         }
     }
 

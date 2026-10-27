@@ -160,6 +160,14 @@ class MainActivity : Activity() {
             else -> false
         }
 
+        private fun onClearHookCacheClick(): Boolean {
+            val prefs = activity.getSharedPreferences("biliroaming_hookinfo", Context.MODE_PRIVATE)
+            val nextGen = prefs.getInt("generation", 0) + 1
+            prefs.edit().putInt("generation", nextGen).apply()
+            Toast.makeText(activity, "将在下次启动哔哩哔哩时重新扫描", Toast.LENGTH_SHORT).show()
+            return true
+        }
+
         private fun isPackageInstalled(packageName: String) = try {
             activity.packageManager.getPackageInfo(packageName, 0)
             true
@@ -173,14 +181,6 @@ class MainActivity : Activity() {
                 putExtra(SettingHook.START_SETTING_KEY, true)
                 startActivity(this)
             }
-        }
-
-        private fun onClearHookCacheClick(): Boolean {
-            val prefs = activity.getSharedPreferences("biliroaming_hookinfo", Context.MODE_PRIVATE)
-            val nextGen = prefs.getInt("generation", 0) + 1
-            prefs.edit().putInt("generation", nextGen).apply()
-            Toast.makeText(activity, "将在下次启动哔哩哔哩时重新扫描", Toast.LENGTH_SHORT).show()
-            return true
         }
     }
 

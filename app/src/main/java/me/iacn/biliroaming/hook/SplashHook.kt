@@ -18,7 +18,7 @@ class SplashHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         // 解除 AbstractComposeView 的 addView 限制，使其恢复普通 ViewGroup 行为
         if (!composeAddViewPatched) {
             try {
-                instance.composeGuardMethod?.replaceMethod { null }
+                instance.composeGuardMethod?.hookMethod { null }
             } catch (_: Throwable) {}
             composeAddViewPatched = true
         }
@@ -35,16 +35,20 @@ class SplashHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         ) return
         Log.d("startHook: Splash")
 
-        instance.splashInfoClass?.hookAfterMethod(
+        instance.splashInfoClass?.hookMethod(
             "getMode"
-        ) { param -> if (fullSplash) param.result = "full" }
+        ) { chain ->
+            val result = chain.proceed()
+            if (fullSplash) "full" else result
+        }
 
-        instance.brandSplashClass?.hookAfterMethod(
+        instance.brandSplashClass?.hookMethod(
             "onViewCreated",
             View::class.java,
             Bundle::class.java
-        ) { param ->
-            val view = param.args[0] as View
+        ) { chain ->
+            chain.proceed()
+            val view = chain.args[0] as View
 
             // auto_dark_splash: 优先设置 splash_container 背景，回退到 root view
             if (autoDarkSplash) {
@@ -64,6 +68,7 @@ class SplashHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             } else {
                 applyComposeOverlay(view, customSplash, customSplashLogo)
             }
+            null
         }
     }
 

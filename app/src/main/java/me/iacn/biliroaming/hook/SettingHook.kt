@@ -18,49 +18,55 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     override fun startHook() {
         Log.d("startHook: Setting")
 
-        instance.splashActivityClass?.hookBeforeMethod("onCreate", Bundle::class.java) { param ->
-            val self = param.thisObject as Activity
+        instance.splashActivityClass?.hookMethod("onCreate", Bundle::class.java) { chain ->
+            val self = chain.thisObject as Activity
             startSetting = self.intent.hasExtra(START_SETTING_KEY)
+            chain.proceed()
         }
 
-        instance.mainActivityClass?.hookAfterMethod("onResume") { param ->
+        instance.mainActivityClass?.hookMethod("onResume") { chain ->
+            val result = chain.proceed()
             if (startSetting) {
                 startSetting = false
-                SettingDialog.show(param.thisObject as Activity)
+                SettingDialog.show(chain.thisObject as Activity)
             }
+            result
         }
 
-        instance.mainActivityClass?.hookBeforeMethod(
+        instance.mainActivityClass?.hookMethod(
             "onCreate",
             Bundle::class.java
-        ) { param ->
-            val bundle = param.args[0] as? Bundle
+        ) { chain ->
+            val bundle = chain.args[0] as? Bundle
             bundle?.remove("android:fragments")
+            chain.proceed()
         }
 
-        instance.drawerClass?.hookAfterMethod(
+        instance.drawerClass?.hookMethod(
             "onCreateView",
             LayoutInflater::class.java,
             ViewGroup::class.java,
             Bundle::class.java
-        ) { param ->
+        ) { chain ->
+            val result = chain.proceed()
             val navSettingId = getId("nav_settings")
             val nav =
-                param.thisObject.javaClass.declaredFields.first { it.type.name == "android.support.design.widget.NavigationView" }.name
-            (param.thisObject.getObjectField(nav)
-                ?: param.result).callMethodAs<View>("findViewById", navSettingId)
+                chain.thisObject!!.javaClass.declaredFields.first { it.type.name == "android.support.design.widget.NavigationView" }.name
+            (chain.thisObject!!.getObjectField(nav)
+                ?: result)!!.callMethodAs<View>("findViewById", navSettingId)
                 .setOnLongClickListener {
-                    SettingDialog.show(param.thisObject.callMethodAs<Activity>("getActivity"))
+                    SettingDialog.show(chain.thisObject!!.callMethodAs<Activity>("getActivity"))
                     true
                 }
+            result
         }
 
         instance.homeCenters().forEach { (c, m) ->
-            c?.hookBeforeAllMethods(m) { param ->
+            c?.hookAllMethods(m) { chain ->
                 @Suppress("UNCHECKED_CAST")
-                val list = param.args[1] as? MutableList<Any>
-                    ?: param.args[1]?.getObjectFieldOrNullAs<MutableList<Any>>("moreSectionList")
-                    ?: return@hookBeforeAllMethods
+                val list = chain.args[1] as? MutableList<Any>
+                    ?: chain.args[1]?.getObjectFieldOrNullAs<MutableList<Any>>("moreSectionList")
+                    ?: return@hookAllMethods chain.proceed()
 
                 val itemList = list.lastOrNull()?.let {
                     if (it.javaClass != instance.menuGroupItemClass) it.getObjectFieldOrNullAs<MutableList<Any>>(
@@ -68,23 +74,28 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     ) else list
                 } ?: list
 
-                val item = makeSettingItem() ?: return@hookBeforeAllMethods
+                val item = makeSettingItem() ?: return@hookAllMethods chain.proceed()
                 itemList.forEach {
                     if (try {
                             it.getIntField("id") == SETTING_ID
                         } catch (t: Throwable) {
                             it.getLongField("id") == SETTING_ID.toLong()
                         }
-                    ) return@hookBeforeAllMethods
+                    ) return@hookAllMethods chain.proceed()
                 }
                 itemList.add(item)
+                chain.proceed()
             }
         }
 
-        instance.settingRouterClass?.hookBeforeAllConstructors { param ->
-            if (param.args[1] != SETTING_URI) return@hookBeforeAllConstructors
-            val routerType = (param.method as Constructor<*>).parameterTypes[3]
-            param.args[3] = Proxy.newProxyInstance(
+        // 8.97.0+: hook 菜单适配器 notify* 方法注入设置项
+        instance.mineAdapterClass?.let { hookAdapterFallback(it) }
+
+        instance.settingRouterClass?.hookAllConstructors { chain ->
+            if (chain.args[1] != SETTING_URI) return@hookAllConstructors chain.proceed()
+            val routerType = (chain.executable as Constructor<*>).parameterTypes[3]
+            val args = chain.args.toTypedArray()
+            args[3] = Proxy.newProxyInstance(
                 routerType.classLoader,
                 arrayOf(routerType)
             ) { _, method, _ ->
@@ -92,14 +103,14 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 Proxy.newProxyInstance(
                     returnType.classLoader,
                     arrayOf(returnType)
-                ) { _, method2, args ->
+                ) { _, method2, args2 ->
                     when (method2.returnType) {
                         Boolean::class.javaPrimitiveType -> false
                         else -> {
                             if (method2.parameterTypes.isNotEmpty() &&
                                 method2.parameterTypes[0].name == "android.app.Activity"
                             ) {
-                                val currentActivity = args[0] as Activity
+                                val currentActivity = args2[0] as Activity
                                 SettingDialog.show(currentActivity)
                             }
                             null
@@ -107,10 +118,8 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     }
                 }
             }
+            chain.proceed(args)
         }
-
-        // 8.97.0+: hook 菜单适配器 notify* 方法注入设置项
-        instance.mineAdapterClass?.let { hookAdapterFallback(it) }
     }
 
     private fun hookAdapterFallback(adapterClass: Class<*>) {
@@ -140,7 +149,7 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 ?.getObjectFieldOrNullAs<MutableList<Any>>("itemList") ?: return
 
             val item = makeSettingItem() ?: return
-            targetList.add(if(targetList.isEmpty()) 0 else targetList.lastIndex, item)
+            targetList.add(if (targetList.isEmpty()) 0 else targetList.lastIndex, item)
         }
 
         // hook RecyclerView.Adapter 多个通知方法代替单一 notifyDataSetChanged
@@ -150,11 +159,12 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             "notifyItemRangeInserted", "notifyItemRangeRemoved", "notifyItemChanged"
         ).forEach { methodName ->
             runCatching {
-                adapterClass.getMethod(methodName).hookBeforeMethod { param ->
-                    if (!adapterClass.isInstance(param.thisObject)) return@hookBeforeMethod
-                    val data = dataField.get(param.thisObject) as? MutableList<*>
-                        ?: return@hookBeforeMethod
+                adapterClass.getMethod(methodName).hookMethod { chain ->
+                    if (!adapterClass.isInstance(chain.thisObject)) return@hookMethod chain.proceed()
+                    val data = dataField.get(chain.thisObject) as? MutableList<*>
+                        ?: return@hookMethod chain.proceed()
                     injectSettingItem(data)
+                    chain.proceed()
                 }
             }
         }
@@ -196,8 +206,12 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         // 2-param onBindViewHolder (首次 bind、全量刷新)
         adapterClass.methods.firstOrNull { m ->
             m.name == "onBindViewHolder" && m.parameterTypes.size == 2
-        }?.hookAfterMethod { param ->
-            bindSettingClick(param.args[0], param.args[1] as Int, param.thisObject)
+        }?.hookMethod { chain ->
+            val result = chain.proceed()
+            val holder = chain.args[0] ?: return@hookMethod result
+            val adapter = chain.thisObject ?: return@hookMethod result
+            bindSettingClick(holder, chain.args[1] as Int, adapter)
+            result
         }
     }
 

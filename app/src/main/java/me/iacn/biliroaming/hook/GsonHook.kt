@@ -6,7 +6,7 @@ import me.iacn.biliroaming.hook.gson.SplashListProcessor
 import me.iacn.biliroaming.hook.gson.SplashShowProcessor
 import me.iacn.biliroaming.utils.Log
 import me.iacn.biliroaming.utils.getObjectField
-import me.iacn.biliroaming.utils.hookAfterAllMethods
+import me.iacn.biliroaming.utils.hookAllMethods
 
 class GsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private val allProcessors = listOf(
@@ -27,8 +27,10 @@ class GsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val gsonClass = instance.gsonClass ?: return
         val fromJsonName = instance.gsonFromJson() ?: return
 
-        gsonClass.hookAfterAllMethods(fromJsonName) { param ->
-            dispatchResult(param.result)
+        gsonClass.hookAllMethods(fromJsonName) { chain ->
+            val result = chain.proceed()
+            dispatchResult(result)
+            result
         }
     }
 

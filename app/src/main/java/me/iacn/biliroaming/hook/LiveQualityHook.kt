@@ -30,12 +30,12 @@ class LiveQualityHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
         val canSwitchLiveRoom = !sPrefs.getBoolean("forbid_switch_live_room", false)
 
-        instance.defaultRequestInterceptClass?.hookBeforeAllMethods(instance.interceptMethod()) { param ->
-            val request = param.args[0]
+        instance.defaultRequestInterceptClass?.hookAllMethods(instance.interceptMethod()) { chain ->
+            val request = chain.args[0]!!
             val httpUrl = request.getObjectField(instance.urlField())
             val url = httpUrl.toString()
             if (!url.startsWith("https://api.live.bilibili.com/xlive/app-room/v2/index/getRoomPlayInfo?")) {
-                return@hookBeforeAllMethods
+                return@hookAllMethods chain.proceed()
             }
 
             debug { "oldHttpUrl: $url" }
@@ -58,17 +58,18 @@ class LiveQualityHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 debug { "newHttpUrl: $newHttpUrl" }
                 request.setObjectField(instance.urlField(), newHttpUrl)
             }
+            chain.proceed()
         }
 
-        instance.retrofitResponseClass?.hookBeforeAllConstructors { param ->
-            val url = getRetrofitUrl(param.args[0]) ?: return@hookBeforeAllConstructors
-            val body = param.args[1] ?: return@hookBeforeAllConstructors
+        instance.retrofitResponseClass?.hookAllConstructors { chain ->
+            val url = getRetrofitUrl(chain.args[0]!!) ?: return@hookAllConstructors chain.proceed()
+            val body = chain.args[1] ?: return@hookAllConstructors chain.proceed()
 
             when {
                 instance.generalResponseClass?.isInstance(body) != true -> Unit
                 // 处理上下滑动切换直播间
                 url.startsWith("https://api.live.bilibili.com/xlive/app-interface/v2/room/recList?") && canSwitchLiveRoom -> {
-                    val data = body.getObjectField("data") ?: return@hookBeforeAllConstructors
+                    val data = body.getObjectField("data") ?: return@hookAllConstructors chain.proceed()
                     val info = JSONObject(
                         instance.fastJsonClass?.callStaticMethod("toJSONString", data).toString()
                     )
@@ -85,33 +86,36 @@ class LiveQualityHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 }
 
                 BuildConfig.DEBUG && url.startsWith("https://api.live.bilibili.com/xlive/app-room/v2/index/getRoomPlayInfo?") -> {
-                    val data = body.getObjectField("data") ?: return@hookBeforeAllConstructors
+                    val data = body.getObjectField("data") ?: return@hookAllConstructors chain.proceed()
                     val info = JSONObject(
                         instance.fastJsonClass?.callStaticMethod("toJSONString", data).toString()
                     )
                     printCodec(info)
                 }
             }
+            chain.proceed()
         }
 
-        instance.liveRTCSourceServiceImplClass?.hookBeforeAllMethods(instance.switchAutoMethod()) { param ->
-            val mode = param.args[0] as? Enum<*> ?: return@hookBeforeAllMethods
+        instance.liveRTCSourceServiceImplClass?.hookAllMethods(instance.switchAutoMethod()) { chain ->
+            val mode = chain.args[0] as? Enum<*> ?: return@hookAllMethods chain.proceed()
             if (mode.ordinal == 2) { // AUTO
-                param.result = null
+                return@hookAllMethods null
             }
+            chain.proceed()
         }
 
-        instance.livePlayUrlSelectUtilClass?.hookBeforeMethod(
+        instance.livePlayUrlSelectUtilClass?.hookMethod(
             instance.buildSelectorDataMethod(),
             Uri::class.java
-        ) { param ->
-            val originalUri = param.args[0] as Uri
+        ) { chain ->
+            val originalUri = chain.args[0] as Uri
             if (!originalUri.isLive()) {
-                return@hookBeforeMethod
+                return@hookMethod chain.proceed()
             }
 
             debug { "originalLiveUrl: $originalUri" }
 
+            val args = chain.args.toTypedArray()
             if (originalUri.getQueryParameter("no_playurl") == "1") {
                 newQn = liveQuality.toString()
             } else {
@@ -120,7 +124,7 @@ class LiveQualityHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     liveQuality
                 ).toString()
 
-                param.args[0] = originalUri.modified(
+                args[0] = originalUri.modified(
                     removeIf = { name ->
                         name.startsWith("playurl")
                     },
@@ -131,6 +135,7 @@ class LiveQualityHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
 
             debug { "newQn: $newQn" }
+            chain.proceed(args)
         }
     }
 
