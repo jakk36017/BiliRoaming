@@ -1,0 +1,420 @@
+syntax = "proto3";
+
+package me.iacn.biliroaming;
+
+option java_package = "me.iacn.biliroaming";
+option java_outer_classname = "Configs";
+option optimize_for = LITE_RUNTIME;
+
+message Class {
+  optional string name = 1;
+}
+
+message Method {
+  optional string name = 1;
+}
+
+message Field {
+  optional string name = 1;
+}
+
+message Request {
+  optional Class class = 1;
+  optional Field url = 2;
+}
+
+message Response {
+  optional Class class = 1;
+  optional Field request = 2;
+}
+
+message ResponseBody {
+  optional Class class = 1;
+  optional Method create = 2;
+  optional Method string = 3;
+}
+
+message HttpUrl {
+  optional Class class = 1;
+  optional Method parse = 2;
+}
+
+message MediaType {
+  optional Class class = 1;
+  optional Method get = 2;
+}
+
+message OkHttp {
+  optional Request request = 1;
+  optional Response response = 2;
+  optional ResponseBody response_body = 3;
+  optional MediaType mediaType = 4;
+  optional HttpUrl httpUrl = 5;
+}
+
+message FastJson {
+  optional Class class = 1;
+  optional Method parse = 2;
+}
+
+message ThemeName {
+  optional Class class = 1;
+  optional Field field = 2;
+}
+
+message ReportDownload {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message BangumiParams {
+  optional Class class = 1;
+  optional Method params_to_map = 2;
+}
+
+message GsonHelper {
+  optional Field gson = 1;
+  optional Class gson_converter = 2;
+  optional Method to_json = 3;
+  optional Method from_json = 4;
+}
+
+message PlayerCoreService {
+  optional Class class = 1;
+  optional Method get_playback_speed = 2;
+  optional Method seek_to = 3;
+  optional Method on_seek_complete = 4;
+  optional Class seek_complete_listener = 5;
+  reserved 6, 7, 8;
+}
+
+message PcsFacade {
+  optional Class play_speed_manager = 1;
+}
+
+message PegasusFeed {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message Popular {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message OkIO {
+  optional Class class = 1;
+  optional Field field = 2;
+  optional Field length = 3;
+}
+
+message OkIOBuffer {
+  optional Class class = 1;
+  optional Method input_stream = 2;
+  optional Method read_from = 3;
+}
+
+message DescCopy {
+  repeated Class classes = 1;
+  repeated Method methods = 2;
+}
+
+message KanBan {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message ToastHelper {
+  optional Class class = 1;
+  optional Method show = 2;
+  optional Method cancel = 3;
+}
+
+message ThemeProcessor {
+  optional Class class = 1;
+  repeated Method methods = 2;
+}
+
+message MapIds {
+  map<string, int32> ids = 1;
+}
+
+message ThemeHelper {
+  optional Class class = 1;
+  optional Field color_array = 2;
+}
+
+message ThemeIdHelper {
+  optional Class class = 1;
+  optional Field color_id = 2;
+}
+
+message ColumnHelper {
+  optional Class class = 1;
+  optional Field color_array = 2;
+}
+
+message SignQuery {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message AutoLike {
+  optional KingPositionComponent kingPositionComponent = 1;
+  optional StoryAbsController storyAbsController = 2;
+}
+
+message KingPositionComponent {
+  optional Class class = 1;
+  optional Field componentMap = 2;
+}
+
+message StoryAbsController {
+  optional Class class = 1;
+  optional Method setMData = 2;
+  optional Method getMPlayer = 3;
+}
+
+message Drawer {
+  optional Class class = 1;
+  optional Class layout = 2;
+  optional Class layout_params = 3;
+  optional Method open = 4;
+  optional Method close = 5;
+  optional Method is_open = 6;
+}
+
+message DownloadThread {
+  optional Class view_host = 1;
+  optional Class listener = 2;
+  optional Field field = 3;
+  optional ReportDownload report_download = 4;
+}
+
+message HomeUserCenter {
+  optional Class class = 1;
+  optional Method add_setting = 2;
+}
+
+message Settings {
+  optional Class menu_group_item = 2;
+  optional Class setting_router = 3;
+  repeated HomeUserCenter home_user_center = 5;
+  optional Class mine_adapter = 6;
+}
+
+message BiliAccounts {
+  optional Class class = 1;
+  optional Method get = 2;
+  optional Method get_access_key = 3;
+}
+
+message PlayerFullStoryWidget {
+  optional Class class = 1;
+  optional Method method = 2;
+}
+
+message BiliCall {
+  optional Class class = 1;
+  optional Class parser = 2;
+  optional Method set_parser = 3;
+  optional Field request = 4;
+}
+
+message BiliConfig {
+  optional Class class = 1;
+  optional Method getAppKey = 2;
+}
+
+message UpdateInfoSupplier {
+  optional Class class = 1;
+  optional Method check = 2;
+}
+
+message PlayerPreloadHolder {
+  optional Class class = 1;
+  optional Method get = 2;
+}
+
+message PlayerQualityService {
+  optional Class class = 1;
+  optional Method get_default_qn_thumb = 2;
+}
+
+message PlayerSettingHelper {
+  optional Class class = 1;
+  optional Method get_default_qn = 2;
+}
+
+message AutoSupremumQuality {
+  optional Class class = 1;
+}
+
+message QualityStrategyProvider {
+  optional Class class = 1;
+  optional Method selectQuality = 2;
+}
+
+message LiveRtcHelper {
+  optional Class live_rtc_enable_class = 1;
+  optional Method live_rtc_enable_method = 2;
+}
+
+message BuiltInThemes {
+  optional Class class = 1;
+  optional Field all = 2;
+}
+
+message BiliGlobalPreference {
+  optional Class class = 1;
+  optional Method get = 2;
+}
+
+message CardClickProcessor {
+  optional Class class = 1;
+  optional Method on_feed_clicked = 2;
+}
+
+message Comment3Copy {
+  optional Class class = 1;
+  optional Method method = 2;
+  optional int32 comment3ViewIndex = 3;
+}
+
+message Continuation {
+  optional Class class = 1;
+}
+
+message VipQualityTrialService {
+  optional Class class = 1;
+  optional Method canTrial = 2;
+}
+
+message LivePlayUrlSelectUtil {
+  optional Class class = 1;
+  optional Method buildSelectorData = 2;
+}
+
+message LiveRTCSourceServiceImpl {
+  optional Class class = 1;
+  optional Method switchAuto = 2;
+}
+
+message DefaultRequestIntercept {
+  optional Class class = 1;
+  optional Method intercept = 2;
+}
+
+message LiveQuality {
+  optional LivePlayUrlSelectUtil selectUtil = 1;
+  optional LiveRTCSourceServiceImpl sourceService = 2;
+  optional DefaultRequestIntercept interceptor = 3;
+}
+
+message PreBuiltConfig {
+  optional Class class = 1;
+  optional Method get = 2;
+}
+
+message DataSP {
+  optional Class class = 1;
+  optional Method get = 2;
+}
+
+message ResolveClientCompanion {
+  optional Class class = 1;
+  optional Method buildCommonResolverParams = 2;
+}
+
+message GCommonResolverParams {
+  optional Class class = 1;
+  optional Method setExtraContent = 2;
+}
+
+message RewardAd {
+  optional Class class_ = 1;
+  optional Field rewardFlag = 2;
+}
+
+message StoryPagerPlayer {
+  optional Class class = 1;
+  optional Method addVideo = 2;
+}
+
+message HookInfo {
+  int64 last_update_time = 1;
+  optional MapIds map_ids = 2;
+  int32 client_version_code = 3;
+  int32 module_version_code = 4;
+  string module_version_name = 5;
+  optional Class retrofit_response = 10;
+  optional OkHttp ok_http = 11;
+  optional FastJson fast_json = 12;
+  optional ThemeHelper theme_helper = 13;
+  optional ThemeIdHelper theme_id_helper = 14;
+  optional Class bangumi_api_response = 15;
+  optional BiliAccounts bili_accounts = 16;
+  optional ColumnHelper column_helper = 17;
+  optional Method skin_list = 19;
+  optional ThemeProcessor theme_processor = 20;
+  optional Class theme_list_click = 22;
+  optional ThemeName theme_name = 24;
+  optional AutoLike autoLike = 25;
+  optional SignQuery sign_query = 27;
+  optional Class general_response = 28;
+  optional Drawer drawer = 30;
+  optional Settings settings = 31;
+  optional DownloadThread download_thread = 34;
+  optional BangumiParams bangumi_params = 45;
+  optional GsonHelper gson_helper = 46;
+  optional PlayerCoreService player_core_service = 47;
+  optional PegasusFeed pegasus_feed = 49;
+  optional Popular popular = 50;
+  optional Class chronos_switch = 51;
+  optional Class subtitle_span = 52;
+  optional Class comment_long_click = 53;
+  optional OkIO okio = 54;
+  optional OkIOBuffer okio_buffer = 55;
+  optional Class comment_span = 57;
+  repeated Class dyn_desc_holder_listener = 58;
+  optional DescCopy desc_copy = 59;
+  optional Class bangumi_season = 60;
+  optional KanBan kan_ban = 67;
+  optional ToastHelper toast_helper = 68;
+  optional Class brotli_input_stream = 69;
+  repeated PlayerFullStoryWidget player_full_story_widget = 71;
+  optional BiliCall bili_call = 72;
+  optional Class comment_long_click_new = 73;
+  optional Method on_operate_click = 74;
+  optional Method get_content_string = 75;
+  optional Class operate_click_host_class = 79;
+  optional Class live_pager_recycler_view = 76;
+  optional BiliConfig bili_config = 77;
+  optional UpdateInfoSupplier update_info_supplier = 78;
+  optional Method bangumi_season_activity_entrance = 82;
+  optional PlayerPreloadHolder player_preload_holder = 83;
+  optional PlayerSettingHelper player_setting_helper = 84;
+  optional LiveRtcHelper live_rtc_helper = 85;
+  optional Class theme_colors = 86;
+  optional BuiltInThemes built_in_themes = 87;
+  optional BiliGlobalPreference bili_global_preference = 88;
+  optional CardClickProcessor card_click_processor = 89;
+  optional Class publish_to_following_config = 90;
+  optional Comment3Copy comment3_copy = 91;
+  repeated PlayerQualityService player_quality_service = 92;
+  optional Class play_speed_manager = 93;
+  optional AutoSupremumQuality autoSupremumQuality = 94;
+  optional QualityStrategyProvider qualityStrategyProvider = 95;
+  optional Continuation continuation = 96;
+  optional VipQualityTrialService vipQualityTrialService = 97;
+  optional LiveQuality liveQuality = 98;
+  optional PreBuiltConfig preBuiltConfig = 99;
+  optional DataSP dataSP = 100;
+  optional Class pegasus_parser = 101;
+  optional ResolveClientCompanion resolveClientCompanion = 102;
+  optional GCommonResolverParams gCommonResolverParams = 103;
+  optional RewardAd rewardAd = 104;
+  optional StoryPagerPlayer storyPagerPlayer = 105;
+  int32 generation = 106;
+  optional Method compose_guard = 107;
+}
