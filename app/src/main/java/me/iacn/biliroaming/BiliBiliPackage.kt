@@ -15,7 +15,6 @@ import android.widget.TextView
 import dalvik.system.BaseDexClassLoader
 import me.iacn.biliroaming.utils.*
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.lang.reflect.Constructor
@@ -24,7 +23,6 @@ import java.lang.reflect.Modifier
 import java.lang.reflect.ParameterizedType
 import java.util.Objects
 import kotlin.math.max
-import kotlin.system.measureTimeMillis
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTimedValue
 
@@ -397,43 +395,10 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     fun addVideo() = mHookInfo.storyPagerPlayer.addVideo.orNull
 
     private fun readHookInfo(context: Context): Configs.HookInfo {
-        try {
-            val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
-            hookInfoFile.delete() // proto 结构变更，强制重扫
-            Log.d("Reading hook info: $hookInfoFile")
-            val t = measureTimeMillis {
-                if (hookInfoFile.isFile && hookInfoFile.canRead()) {
-                    val lastUpdateTime = context.packageManager.getPackageInfo(
-                        currentContext.packageName,
-                        0
-                    ).lastUpdateTime
-                    val lastModuleUpdateTime = try {
-                        context.packageManager.getPackageInfo(BuildConfig.APPLICATION_ID, 0)
-                    } catch (e: Throwable) {
-                        null
-                    }?.lastUpdateTime ?: 0
-                    val info = FileInputStream(hookInfoFile).use {
-                        runCatchingOrNull { Configs.HookInfo.parseFrom(it) }
-                            ?: Configs.HookInfo.newBuilder().build()
-                    }
-                    if (info.lastUpdateTime >= lastUpdateTime && info.lastUpdateTime >= lastModuleUpdateTime
-                        && getVersionCode(context.packageName) == info.clientVersionCode
-                        && BuildConfig.VERSION_CODE == info.moduleVersionCode
-                        && BuildConfig.VERSION_NAME == info.moduleVersionName
-                        && info.generation >= getModuleGeneration(context)
-                        && info.biliAccounts.getAccessKey.orNull != null
-                    )
-                        return info
-                }
-            }
-            Log.d("Read hook info completed: take $t ms")
-        } catch (e: Throwable) {
-            Log.w(e)
-        }
+        val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
+        hookInfoFile.delete() // proto 结构变更，强制重扫
         return initHookInfo(context).also {
             try {
-                val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
-                if (hookInfoFile.exists()) hookInfoFile.delete()
                 FileOutputStream(hookInfoFile).use { o -> it.writeTo(o) }
             } catch (e: Exception) {
                 Log.e(e)
@@ -1714,8 +1679,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     "clipboard", false, -1, -1, null, -1, null, null, null, false
                 ).asSequence().mapNotNull { dexHelper.decodeMethodIndex(it) }
                     .filterIsInstance<java.lang.reflect.Method>()
-                    .toList()
-                    .also { Log.e("descCopyPress scan: clipboard raw hits=${it.size}") }
                     .forEach { m ->
                         if (isTarget(m)) matched["${m.declaringClass.name}#${m.name}"] = m
                     }
@@ -1728,7 +1691,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     if (isTarget(m)) matched["${m.declaringClass.name}#${m.name}"] = m
                 }
                 matched.values.forEach { m ->
-                    Log.e("descCopyPress hit: ${m.declaringClass.name}#${m.name}(String, boolean)")
                     descCopyPress.add(descCopyPress {
                         class_ = class_ { name = m.declaringClass.name }
                         method = method { name = m.name }
@@ -1754,25 +1716,18 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     val posClass =
                         "kntr.common.comment.card.action.CardReportAction\$CommentCardAllClick\$Pos"
                             .findClassOrNull(classloader)
-                    Log.e("commentMoreMenuCopy posClass=$posClass")
                     val copyField = posClass?.runCatchingOrNull { getField("COPY") }
-                    Log.e("commentMoreMenuCopy copyField=$copyField")
                     if (copyField != null) {
                         val fieldIndex = dexHelper.encodeFieldIndex(copyField)
-                        Log.e("commentMoreMenuCopy fieldIndex=$fieldIndex")
-                        val rawResults = dexHelper.findMethodGettingField(
+                        dexHelper.findMethodGettingField(
                             fieldIndex, -1, -1, null, -1, null, null, null, false
-                        )
-                        Log.e("commentMoreMenuCopy findMethodGettingField returned ${rawResults.size} entries")
-                        val candidates = rawResults.asSequence()
+                        ).asSequence()
                             .mapNotNull { dexHelper.decodeMethodIndex(it) }
                             .filter { it.declaringClass.name.startsWith("kntr.common.comment.page.ui.") }
-                            .toList()
-                        Log.e("commentMoreMenuCopy ${candidates.size} candidates: ${candidates.map { "${it.declaringClass.name}#${it.name}" }}")
-                        candidates.firstOrNull()?.let {
-                            class_ = class_ { name = it.declaringClass.name }
-                            method = method { name = it.name }
-                        }
+                            .firstOrNull()?.let {
+                                class_ = class_ { name = it.declaringClass.name }
+                                method = method { name = it.name }
+                            }
                     }
                 }
             } ?: Log.e("commentMoreMenuCopy: scan crashed")
