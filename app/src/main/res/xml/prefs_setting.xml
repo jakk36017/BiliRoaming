@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?><!--suppress DeprecatedClassUsageInspection -->
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <PreferenceCategory android:title="@string/main_category">
+    <PreferenceScreen
+        android:key="main_category"
+        android:summary="@string/parent_summary_main_category"
+        android:title="@string/main_category">
         <SwitchPreference
             android:key="main_func"
             android:summary="@string/main_func_summary"
@@ -30,9 +33,12 @@
             android:key="allow_mini_play"
             android:summary="@string/allow_mini_play_summary"
             android:title="@string/allow_mini_play_title" />
-    </PreferenceCategory>
+    </PreferenceScreen>
 
-    <PreferenceCategory android:title="@string/cdn_category">
+    <PreferenceScreen
+        android:key="cdn_category"
+        android:summary="@string/parent_summary_cdn_category"
+        android:title="@string/cdn_category">
         <ListPreference
             android:defaultValue="@string/ali_host"
             android:entries="@array/upos_entries"
@@ -60,9 +66,12 @@
             android:key="block_pcdn_live"
             android:summary="@string/block_pcdn_live_summary"
             android:title="@string/block_pcdn_live_title" />
-    </PreferenceCategory>
+    </PreferenceScreen>
 
-    <PreferenceCategory android:title="@string/beautify_category">
+    <PreferenceScreen
+        android:key="beautify_category"
+        android:summary="@string/parent_summary_beautify_category"
+        android:title="@string/beautify_category">
         <SwitchPreference
             android:key="custom_theme"
             android:summary="@string/custom_theme_summary"
@@ -109,9 +118,12 @@
             android:key="dialog_blur_background"
             android:summary="@string/dialog_blur_background_summary"
             android:title="@string/dialog_blur_background_title" />
-    </PreferenceCategory>
+    </PreferenceScreen>
 
-    <PreferenceCategory android:title="@string/miscellaneous_category">
+    <PreferenceScreen
+        android:key="miscellaneous_category"
+        android:summary="@string/parent_summary_miscellaneous_category"
+        android:title="@string/miscellaneous_category">
         <SwitchPreference
             android:key="teenagers_mode_dialog"
             android:summary="@string/teenagers_mode_dialog_summary"
@@ -295,17 +307,21 @@
             android:defaultValue="300"
             android:key="long_press_speed"
             android:title="@string/long_press_speed" />
-    </PreferenceCategory>
-    <PreferenceCategory android:title="@string/pref_backup">
+    </PreferenceScreen>
+    <PreferenceScreen
+        android:key="pref_backup"
+        android:summary="@string/parent_summary_pref_backup"
+        android:title="@string/pref_backup">
         <Preference
             android:key="pref_export"
             android:title="@string/pref_export_title" />
         <Preference
             android:key="pref_import"
             android:title="@string/pref_import_title" />
-    </PreferenceCategory>
-    <PreferenceCategory
+    </PreferenceScreen>
+    <PreferenceScreen
         android:key="hidden_group"
+        android:summary="@string/parent_summary_hidden_group"
         android:title="@string/hidden_group">
 
         <SwitchPreference
@@ -560,9 +576,12 @@
             android:key="copy_access_key"
             android:summary="@string/copy_access_key_summary"
             android:title="@string/copy_access_key_title" />
-    </PreferenceCategory>
+    </PreferenceScreen>
 
-    <PreferenceCategory android:title="@string/setting_category">
+    <PreferenceScreen
+        android:key="setting_category"
+        android:summary="@string/parent_summary_setting_category"
+        android:title="@string/setting_category">
         <SwitchPreference
             android:defaultValue="true"
             android:key="show_info"
@@ -577,10 +596,11 @@
             android:key="share_log"
             android:summary="@string/share_log_summary"
             android:title="@string/share_log_title" />
-    </PreferenceCategory>
+    </PreferenceScreen>
 
-    <PreferenceCategory
+    <PreferenceScreen
         android:key="about"
+        android:summary="@string/parent_summary_about"
         android:title="@string/about">
 
         <Preference
@@ -632,6 +652,6 @@
                 android:data="@string/tg_url" />
         </Preference>
 
-    </PreferenceCategory>
+    </PreferenceScreen>
 
 </PreferenceScreen>

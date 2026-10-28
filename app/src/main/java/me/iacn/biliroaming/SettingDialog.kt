@@ -51,6 +51,8 @@ import kotlin.system.exitProcess
 
 
 class SettingDialog(context: Context) : AlertDialog.Builder(context) {
+    private lateinit var prefsFragment: PrefsFragment
+    private var currentDialog: AlertDialog? = null
 
     class PrefsFragment : PreferenceFragment(), Preference.OnPreferenceChangeListener,
         Preference.OnPreferenceClickListener {
@@ -62,6 +64,12 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         private lateinit var listView: ListView
         private lateinit var adapter: BaseAdapter
         private var searchItems = listOf<SearchItem>()
+        // 当前进入的子菜单（嵌套 PreferenceScreen），null 表示在一级菜单
+        private var currentSubScreen: PreferenceScreen? = null
+        // 未解锁时被移除的隐藏功能分组，解锁后重新加回一级菜单
+        private var hiddenGroupScreen: PreferenceScreen? = null
+        // 切换菜单层级时回调，用于更新对话框标题
+        var onTitleChange: ((CharSequence?) -> Unit)? = null
 
         private var ListAdapter.preferenceList: List<Preference>
             get() = getObjectFieldAs("mPreferenceList")
@@ -81,13 +89,40 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                 Context.MODE_MULTI_PROCESS
             )
             if (!prefs.getBoolean("hidden", false)) {
-                val hiddenGroup = findPreference("hidden_group") as PreferenceCategory
-                preferenceScreen.removePreference(hiddenGroup)
+                // hidden_group 是嵌套 PreferenceScreen，不能强转为 PreferenceCategory
+                // 保存引用，点版本号 7 次解锁后立即加回主菜单，不用重开设置弹窗
+                hiddenGroupScreen = findPreference("hidden_group") as? PreferenceScreen
+                hiddenGroupScreen?.let { preferenceScreen.removePreference(it) }
+            }
+            // 给 8 个嵌套分类 screen 设置点击监听，由 onPreferenceClick 里
+            // 切换主 ListView 的 adapter 来展示子菜单（同一弹窗内，不弹新窗口）。
+            // 注意必须同时设置非空 intent：老框架 PreferenceScreen.onClick 里
+            // 有 intent 时直接 return 不弹默认的全屏 Dialog；而我们的 listener
+            // 返回 true 会拦截 performClick 后续逻辑，该 intent 不会真的执行。
+            listOf(
+                "main_category", "cdn_category", "beautify_category",
+                "miscellaneous_category", "pref_backup", "hidden_group",
+                "setting_category", "about"
+            ).forEach {
+                findPreference(it)?.apply {
+                    intent = Intent()
+                    onPreferenceClickListener = this@PrefsFragment
+                    applyAccentTitle()
+                }
             }
             findPreference("version")?.summary = BuildConfig.VERSION_NAME
             findPreference("version")?.onPreferenceClickListener = this
+            // QQ 频道的 intent 是 mqqguild:// scheme，未安装 QQ 时框架直接 startActivity 会崩，
+            // 这里拦截点击并捕获异常提示
+            findPreference("group")?.setOnPreferenceClickListener {
+                runCatching { startActivity(it.intent) }.onFailure {
+                    Toast.makeText(activity, "未安装QQ", Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
             findPreference("custom_splash")?.onPreferenceChangeListener = this
             findPreference("custom_splash_logo")?.onPreferenceChangeListener = this
+            findPreference("hidden")?.onPreferenceChangeListener = this
             findPreference("save_log")?.summary =
                 XposedInit.moduleRes.getString(R.string.save_log_summary).format(logFile.absolutePath)
             findPreference("custom_server")?.onPreferenceClickListener = this
@@ -201,6 +236,8 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         }
 
         fun search(text: String) {
+            // 子菜单状态下输入搜索词：先切回一级菜单列表，搜索结果显示为全局结果
+            if (text.isNotEmpty()) backToMain()
             val preferences = if (text.isEmpty()) {
                 searchItems.map { it.restore(); it.preference }
             } else {
@@ -233,7 +270,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                 if (newestVer.isNotEmpty() && versionName != newestVer) {
                     searchItems.forEach { it.restore() }
                     findPreference("version").summary = "${versionName}（最新版$newestVer）"
-                    (findPreference("about") as PreferenceCategory).addPreference(
+                    (findPreference("about") as PreferenceGroup).addPreference(
                         Preference(activity).apply {
                             key = "update"
                             title = XposedInit.moduleRes.getString(R.string.update_title)
@@ -372,6 +409,18 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     if (newValue as Boolean)
                         onAddCustomButtonClick()
                 }
+
+                "hidden" -> {
+                    if (newValue == false) {
+                        // 关闭隐藏功能时立即从一级菜单移除入口（原版要重开弹窗才消失），
+                        // 保存引用以便再次通过版本号解锁时加回
+                        (findPreference("hidden_group") as? PreferenceScreen)?.let {
+                            hiddenGroupScreen = it
+                            preferenceScreen.removePreference(it)
+                            adapter.notifyDataSetChanged()
+                        }
+                    }
+                }
             }
             return true
         }
@@ -475,12 +524,39 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             if (prefs.getBoolean("hidden", false) || counter == 7) return true
             if (++counter == 7) {
                 prefs.edit()?.putBoolean("hidden", true)?.apply()
-                Log.toast("已开启隐藏功能，重启应用生效", true)
+                showHiddenGroup()
+                Log.toast("已开启隐藏功能", true)
             } else if (counter >= 4) {
                 Log.toast("再按${7 - counter}次开启隐藏功能", true)
             }
 
             return true
+        }
+
+        /** 解锁后把隐藏功能分组加回一级菜单原位置（备份和还原之后、设置之前），当前弹窗立即生效 */
+        private fun showHiddenGroup() {
+            val hidden = hiddenGroupScreen ?: return
+            hiddenGroupScreen = null
+            // 与其他一级菜单一致的点击行为：拦截框架默认全屏 Dialog，弹窗内切换列表
+            hidden.intent = Intent()
+            hidden.onPreferenceClickListener = this
+            hidden.applyAccentTitle()
+            val root = preferenceScreen
+            val orderKeys = listOf(
+                "main_category", "cdn_category", "beautify_category",
+                "miscellaneous_category", "pref_backup", "setting_category", "about"
+            )
+            // 同 order 的 PreferenceGroup 按添加顺序排列，故先全部移除再按 XML 原顺序加回，
+            // 保证 hidden 落在 pref_backup 之后、setting_category 之前；
+            // 重新 add 时子项会重新注册依赖，main_category 必须先于 miscellaneous_category 加回
+            val ordered = mutableListOf<Preference>()
+            orderKeys.forEach { key ->
+                root.findPreference(key)?.let { ordered.add(it) }
+                if (key == "pref_backup") ordered.add(hidden)
+            }
+            root.removeAll()
+            ordered.forEach { root.addPreference(it) }
+            adapter.notifyDataSetChanged()
         }
 
         private fun onUpdateClick(): Boolean {
@@ -973,7 +1049,48 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             "copy_access_key" -> onCopyAccessKeyClick()
             "purify_story_video_ad" -> onPurifyStoryVideoAdClick()
             "long_press_speed" -> onLongPressSpeedClick()
-            else -> false
+            else -> {
+                // 嵌套分类 PreferenceScreen：拦截框架默认的全屏 Dialog，
+                // 在当前对话框内切换列表内容展示二级子选项
+                if (preference is PreferenceScreen) {
+                    openSubScreen(preference)
+                    true
+                } else false
+            }
+        }
+
+        /** 把一级菜单条目标题染成主题强调色（与对话框底部按钮颜色一致） */
+        private fun Preference.applyAccentTitle() {
+            val tv = android.util.TypedValue()
+            activity.theme.resolveAttribute(android.R.attr.colorAccent, tv, true)
+            // 颜色属性解析后 tv.data 直接就是颜色值，无需再查资源
+            title = android.text.SpannableString(title).apply {
+                setSpan(android.text.style.ForegroundColorSpan(tv.data), 0, length, 0)
+            }
+        }
+
+        private fun openSubScreen(screen: PreferenceScreen) {
+            // 不弹新窗口，用该嵌套 screen 自己的 bind() 切换列表。
+            // 必须 bind 而不是只换 adapter：bind 会同时把 ListView 的点击监听器
+            // 换成该 screen 自己，其 onItemClick 用它自己的 rootAdapter 取 item，
+            // 保证显示内容和点击映射一致（否则点击会错位到一级菜单的项上）。
+            currentSubScreen = screen
+            screen.bind(listView)
+            listView.forceSetSelection(0)
+            // toString() 转成纯文本，避免染色 span 把对话框标题也染色
+            onTitleChange?.invoke(screen.title?.toString())
+        }
+
+        /** 二级菜单状态下切回一级菜单列表，返回 true；已在一级菜单返回 false（此时应关闭对话框） */
+        fun backToMain(): Boolean {
+            if (currentSubScreen == null) return false
+            currentSubScreen = null
+            // 恢复根 screen 的 adapter 和点击监听器
+            preferenceScreen.bind(listView)
+            adapter.notifyDataSetChanged()
+            listView.forceSetSelection(0)
+            onTitleChange?.invoke("哔哩漫游设置")
+            return true
         }
     }
 
@@ -1113,6 +1230,9 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
         }
 
         val prefsFragment = PrefsFragment()
+        this.prefsFragment = prefsFragment
+        // 进入二级菜单时标题变为分组名，返回一级菜单时恢复
+        prefsFragment.onTitleChange = { currentDialog?.setTitle(it) }
         activity.fragmentManager.beginTransaction().add(prefsFragment, "Setting").commit()
         activity.fragmentManager.executePendingTransactions()
 
@@ -1143,6 +1263,16 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             unhook?.unhook()
             summaryHook?.unhook()
         }
+    }
+
+    override fun show(): AlertDialog {
+        val dialog = super.show()
+        currentDialog = dialog
+        // 覆盖"返回"按钮默认的关闭行为：二级菜单时返回一级菜单，一级菜单时才关闭对话框
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+            if (!prefsFragment.backToMain()) dialog.dismiss()
+        }
+        return dialog
     }
 
     companion object {

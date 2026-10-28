@@ -319,4 +319,13 @@
     <string name="auto_receive_coupon_summary">启动时自动领取大会员B币券、每日经验及视频分享经验</string>
     <string name="skip_video_ad_title">跳过视频广告</string>
     <string name="skip_video_ad_summary">一个简单的跳过视频广告功能，参考BilibiliSponsorBlock实现</string>
+    <!-- 一级菜单分组摘要 -->
+    <string name="parent_summary_main_category">解锁番剧区域限制，自定义解析服务器，支持版权番剧下载与小窗</string>
+    <string name="parent_summary_cdn_category">自定义 CDN 节点，强制走 UPOS 加速，屏蔽 P2P</string>
+    <string name="parent_summary_beautify_category">主题色、启动图、抽屉背景、字幕样式等界面个性化</string>
+    <string name="parent_summary_miscellaneous_category">评论复制、播放器增强、下载优化、弹幕过滤等实用功能</string>
+    <string name="parent_summary_pref_backup">导出或导入模块配置文件</string>
+    <string name="parent_summary_setting_category">模块开关、日志等级、调试模式等运行设置</string>
+    <string name="parent_summary_hidden_group">净化广告、首页与抽屉自定义、激励广告跳过等彩蛋功能</string>
+    <string name="parent_summary_about">版本更新、作者信息、赞助与帮助渠道</string>
 </resources>
