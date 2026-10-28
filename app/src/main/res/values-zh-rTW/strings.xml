@@ -287,4 +287,6 @@
     <string name="skip_reward_ad_summary">有了這個，終於能過第二關了😋（需重啟兩次嗶哩嗶哩）</string>
     <string name="purify_story_video_ad_title">淨化豎屏模式廣告/推廣</string>
     <string name="purify_story_video_ad_summary">有了這個，連第一關都看不到了😭</string>
+    <string name="auto_receive_coupon_title">自動領取卡券及經驗</string>
+    <string name="auto_receive_coupon_summary">啟動時自動領取大會員B幣券、每日經驗及視頻分享經驗</string>
 </resources>

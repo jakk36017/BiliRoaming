@@ -315,6 +315,8 @@
     <string name="purify_story_video_ad_title">净化竖屏模式广告/推广</string>
     <string name="purify_story_video_ad_summary">有了这个，连第一关都看不到了😭</string>
     <string name="long_press_speed">长按播放速度设置</string>
+    <string name="auto_receive_coupon_title">自动领取卡券及经验</string>
+    <string name="auto_receive_coupon_summary">启动时自动领取大会员B币券、每日经验及视频分享经验</string>
     <string name="skip_video_ad_title">跳过视频广告</string>
     <string name="skip_video_ad_summary">一个简单的跳过视频广告功能，参考BilibiliSponsorBlock实现</string>
 </resources>

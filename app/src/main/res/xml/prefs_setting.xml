@@ -313,6 +313,12 @@
             android:key="hidden"
             android:summary="@string/hidden_summary"
             android:title="@string/hidden_title" />
+        <SwitchPreference
+            android:defaultValue="false"
+            android:dependency="hidden"
+            android:key="auto_receive_coupon"
+            android:summary="@string/auto_receive_coupon_summary"
+            android:title="@string/auto_receive_coupon_title" />
         <Preference
             android:dependency="hidden"
             android:key="home_filter"
