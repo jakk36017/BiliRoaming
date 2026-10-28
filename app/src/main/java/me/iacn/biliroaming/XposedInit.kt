@@ -135,6 +135,7 @@ class XposedInit : XposedModule() {
                     startHook { StoryPlayerAdHook(classLoader) }
                     startHook { LongPressSpeed(classLoader) }
                     startHook { SkipVideoAd(classLoader) }
+                    startHook { PauseAdHook(classLoader) }
                     startHook { CouponAutoHook(classLoader) }
                 }
 
