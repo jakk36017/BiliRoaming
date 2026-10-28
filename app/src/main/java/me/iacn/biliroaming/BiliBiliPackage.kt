@@ -90,6 +90,8 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     val commentCopyClass by Weak { mHookInfo.commentLongClick from mClassLoader }
     val commentCopyNewClass by Weak { mHookInfo.commentLongClickNew from mClassLoader }
     val comment3CopyClass by Weak { mHookInfo.comment3Copy.class_ from mClassLoader }
+    val commentMoreMenuInteractClass by Weak { mHookInfo.commentMoreMenuInteract.class_ from mClassLoader }
+    val commentMoreMenuCopyClass by Weak { mHookInfo.commentMoreMenuCopy.class_ from mClassLoader }
     val kotlinJsonClass by Weak { "kotlinx.serialization.json.Json" from mClassLoader }
     val gsonConverterClass by Weak { mHookInfo.gsonHelper.gsonConverter from mClassLoader }
     val playerCoreServiceV2Class by Weak { mHookInfo.playerCoreService.class_ from mClassLoader }
@@ -295,6 +297,13 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
 
     fun comment3ViewIndex() = mHookInfo.comment3Copy.comment3ViewIndex
 
+    fun descCopyPressList() =
+        mHookInfo.descCopyPressList.map { it.class_.from(mClassLoader) to it.method.orNull }
+
+    fun commentMoreMenuInteract() = mHookInfo.commentMoreMenuInteract.method.orNull
+
+    fun commentMoreMenuCopy() = mHookInfo.commentMoreMenuCopy.method.orNull
+
     fun responseDataField() = runCatchingOrNull {
         rxGeneralResponseClass?.getDeclaredField("data")?.name
     } ?: "_data"
@@ -390,6 +399,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     private fun readHookInfo(context: Context): Configs.HookInfo {
         try {
             val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
+            hookInfoFile.delete() // proto 结构变更，强制重扫
             Log.d("Reading hook info: $hookInfoFile")
             val t = measureTimeMillis {
                 if (hookInfoFile.isFile && hookInfoFile.canRead()) {
@@ -1689,6 +1699,83 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     methods += method { name = it.name }
                 }
             }
+            // 简介长按自由复制：双锚点扫描（"clipboard" 字符串 + UgcHeadlineService$ 类前缀）
+            runCatchingOrNull {
+                val voidType = Void.TYPE
+                val matched = LinkedHashMap<String, java.lang.reflect.Method>()
+
+                fun isTarget(m: java.lang.reflect.Method) =
+                    m.returnType == voidType && m.parameterTypes.size == 2 &&
+                        ((m.parameterTypes[0] == String::class.java && m.parameterTypes[1] == Boolean::class.javaPrimitiveType) ||
+                            (m.parameterTypes[0] == Boolean::class.javaPrimitiveType && m.parameterTypes[1] == String::class.java))
+
+                // 锚点1（BiliRoamingX 同款）："clipboard" 字符串字面量
+                dexHelper.findMethodUsingString(
+                    "clipboard", false, -1, -1, null, -1, null, null, null, false
+                ).asSequence().mapNotNull { dexHelper.decodeMethodIndex(it) }
+                    .filterIsInstance<java.lang.reflect.Method>()
+                    .toList()
+                    .also { Log.e("descCopyPress scan: clipboard raw hits=${it.size}") }
+                    .forEach { m ->
+                        if (isTarget(m)) matched["${m.declaringClass.name}#${m.name}"] = m
+                    }
+                // 锚点2：UgcHeadlineService$ 内部类前缀
+                classesList.filter {
+                    it.startsWith("com.bilibili.ship.theseus.ugc.intro.ugcheadline.UgcHeadlineService\$")
+                }.map { it.on(classloader) }.flatMap { c ->
+                    c.declaredMethods.filter { it.isPublic && !it.isSynthetic }
+                }.forEach { m ->
+                    if (isTarget(m)) matched["${m.declaringClass.name}#${m.name}"] = m
+                }
+                matched.values.forEach { m ->
+                    Log.e("descCopyPress hit: ${m.declaringClass.name}#${m.name}(String, boolean)")
+                    descCopyPress.add(descCopyPress {
+                        class_ = class_ { name = m.declaringClass.name }
+                        method = method { name = m.name }
+                    })
+                }
+            } ?: Log.e("descCopyPress: scan crashed")
+            // 评论长按拦截：kntr.common.comment.page.service 包下使用 "interact interaction=" 的方法
+            runCatchingOrNull {
+                dexHelper.findMethodUsingString(
+                    "interact interaction=", false, -1, -1, null, -1, null, null, null, false
+                ).asSequence().mapNotNull { dexHelper.decodeMethodIndex(it) }
+                    .filter { it.declaringClass.name.startsWith("kntr.common.comment.page.service.") }
+                    .firstOrNull()?.let {
+                        commentMoreMenuInteract = comment3Copy {
+                            class_ = class_ { name = it.declaringClass.name }
+                            method = method { name = it.name }
+                        }
+                    }
+            } ?: Log.e("commentMoreMenuInteract: scan crashed")
+            // 评论三点菜单复制：COPY 枚举字段引用扫描定位 D0.invoke
+            runCatchingOrNull {
+                commentMoreMenuCopy = comment3Copy {
+                    val posClass =
+                        "kntr.common.comment.card.action.CardReportAction\$CommentCardAllClick\$Pos"
+                            .findClassOrNull(classloader)
+                    Log.e("commentMoreMenuCopy posClass=$posClass")
+                    val copyField = posClass?.runCatchingOrNull { getField("COPY") }
+                    Log.e("commentMoreMenuCopy copyField=$copyField")
+                    if (copyField != null) {
+                        val fieldIndex = dexHelper.encodeFieldIndex(copyField)
+                        Log.e("commentMoreMenuCopy fieldIndex=$fieldIndex")
+                        val rawResults = dexHelper.findMethodGettingField(
+                            fieldIndex, -1, -1, null, -1, null, null, null, false
+                        )
+                        Log.e("commentMoreMenuCopy findMethodGettingField returned ${rawResults.size} entries")
+                        val candidates = rawResults.asSequence()
+                            .mapNotNull { dexHelper.decodeMethodIndex(it) }
+                            .filter { it.declaringClass.name.startsWith("kntr.common.comment.page.ui.") }
+                            .toList()
+                        Log.e("commentMoreMenuCopy ${candidates.size} candidates: ${candidates.map { "${it.declaringClass.name}#${it.name}" }}")
+                        candidates.firstOrNull()?.let {
+                            class_ = class_ { name = it.declaringClass.name }
+                            method = method { name = it.name }
+                        }
+                    }
+                }
+            } ?: Log.e("commentMoreMenuCopy: scan crashed")
             comment3Copy = comment3Copy {
                 classesList.filter {
                     it.startsWith("com.bilibili.app.comment3.ui.holder.handle.CommentContentRichTextHandler")

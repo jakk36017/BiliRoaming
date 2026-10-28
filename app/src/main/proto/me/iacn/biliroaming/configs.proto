@@ -119,6 +119,11 @@ message DescCopy {
   repeated Method methods = 2;
 }
 
+message DescCopyPress {
+  optional Class class_ = 1;
+  optional Method method = 2;
+}
+
 message KanBan {
   optional Class class = 1;
   optional Method method = 2;
@@ -417,4 +422,7 @@ message HookInfo {
   optional StoryPagerPlayer storyPagerPlayer = 105;
   int32 generation = 106;
   optional Method compose_guard = 107;
+  optional Comment3Copy comment_more_menu_interact = 110;
+  optional Comment3Copy comment_more_menu_copy = 111;
+  repeated DescCopyPress desc_copy_press = 112;
 }
