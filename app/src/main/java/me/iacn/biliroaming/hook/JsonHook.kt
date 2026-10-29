@@ -1,13 +1,43 @@
 package me.iacn.biliroaming.hook
 
+import android.view.View
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
+import java.lang.reflect.Field
+import java.lang.reflect.GenericArrayType
+import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
+import java.lang.reflect.WildcardType
 
 class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     companion object {
         val bottomItems = mutableListOf<BottomItem>()
         val drawerItems = mutableListOf<BottomItem>()
+
+        private const val HOME_TAB_DATA_SERIAL = "tv.danmaku.bili.khomeapi.frame.HomeTabData"
+        private const val HOME_TAB_ITEM_SERIAL = "tv.danmaku.bili.khomeapi.frame.HomeTabItemData"
+        private const val MAX_GENERIC_DEPTH = 4
+        private val BOTTOM_TAB_HOST_CLASSES = listOf(
+            "com.bilibili.lib.homepage.widget.TabHost",
+            "com.bilibili.p5690lib.p5708homepage.widget.TabHost",
+            "tv.danmaku.bili.ui.main2.widget.TabHost",
+            "tv.danmaku.p9138bili.p9228ui.main2.widget.TabHost"
+        )
+        private val NON_ROUTE_SCHEMES = setOf("http", "https", "file")
+        private val SPLASH_RESPONSE_CLASSES = listOf(
+            "tv.danmaku.bili.splash.ad.model.SplashListResponse",
+            "tv.danmaku.bili.splash.ad.model.SplashShowResponse",
+            "tv.danmaku.bili.ui.splash.SplashData",
+            "tv.danmaku.bili.ui.splash.ad.model.SplashData",
+            "tv.danmaku.bili.ui.splash.ShowSplashData",
+            "tv.danmaku.bili.ui.splash.ad.model.SplashShowData"
+        )
+        private val SPLASH_LIST_GETTERS =
+            setOf("getSplashList", "getStrategyList", "getShowList", "getAdList")
+        private val SKIPPED_PACKAGES =
+            listOf("java.", "javax.", "kotlin.", "kotlinx.", "android.", "androidx.")
     }
 
     override fun startHook() {
@@ -25,9 +55,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             "tv.danmaku.bili.ui.main2.api.AccountMine".findClassOrNull(mClassLoader)
         val garbEntranceClass =
             "tv.danmaku.bili.ui.main2.api.AccountMine\$GarbEntrance".from(mClassLoader)
-        val splashClass = "tv.danmaku.bili.ui.splash.SplashData".findClassOrNull(mClassLoader)
-            ?: "tv.danmaku.bili.ui.splash.ad.model.SplashData".findClassOrNull(mClassLoader)
-        val splashShowClass = "tv.danmaku.bili.ui.splash.ad.model.SplashShowData".findClassOrNull(mClassLoader)
         val tabClass =
             "tv.danmaku.bili.ui.main2.resource.MainResourceManager\$Tab".findClassOrNull(
                 mClassLoader
@@ -82,17 +109,10 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val channelItemClass = "com.bilibili.lib.sharewrapper.online.api.ShareChannels\$ChannelItem"
             .from(mClassLoader)
 
-        instance.fastJsonClass?.hookMethod(
-            instance.fastJsonParse(),
-            String::class.java,
-            Type::class.java,
-            Int::class.javaPrimitiveType,
-            "com.alibaba.fastjson.parser.Feature[]"
-        ) { chain ->
-            val origResult = chain.proceed()
-            var result = origResult ?: return@hookMethod null
+        val processFastJsonResult: (Any?) -> Any? = processFastJsonResult@{ origResult ->
+            var result = origResult ?: return@processFastJsonResult null
             if (result.javaClass == instance.generalResponseClass) {
-                result = result.getObjectField("data") ?: return@hookMethod origResult
+                result = result.getObjectField("data") ?: return@processFastJsonResult origResult
             }
 
             when (result.javaClass) {
@@ -271,12 +291,6 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         }
                     }
                 }
-                splashClass, splashShowClass -> if (sPrefs.getBoolean("purify_splash", false) &&
-                    sPrefs.getBoolean("hidden", false)
-                ) {
-                    result.getObjectFieldOrNullAs<MutableList<*>>("splashList")?.clear()
-                    result.getObjectFieldOrNullAs<MutableList<*>>("strategyList")?.clear()
-                }
                 defaultWordClass, defaultKeywordClass, searchRanksClass, searchReferralClass, followingcardSearchRanksClass -> if (sPrefs.getBoolean(
                         "purify_search",
                         false
@@ -360,7 +374,7 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
                 shareChannelsClass -> if (unlockPlayLimit) runCatchingOrNull {
                     val belowChannels = result.getObjectFieldAs<ArrayList<Any>?>("belowChannels")
-                        .takeUnless { it.isNullOrEmpty() } ?: return@hookMethod origResult
+                        .takeUnless { it.isNullOrEmpty() } ?: return@processFastJsonResult origResult
                     var alreadyHas = false
                     var toInsertIdx = -1
                     belowChannels.forEachIndexed { idx, item ->
@@ -371,18 +385,48 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                             alreadyHas = true
                     }
                     if (alreadyHas || toInsertIdx == -1)
-                        return@hookMethod origResult
+                        return@processFastJsonResult origResult
                     val listenChannel = channelItemClass?.new()
                         ?.setObjectField("name", "听视频")
                         ?.setObjectField("shareChannel", "LISTEN")
                         ?.setObjectField(
                             "picture",
                             "https://i0.hdslb.com/bfs/share/f88d8c420a59ff1ca5975b38722408056e7337b7.png"
-                        ) ?: return@hookMethod origResult
+                        ) ?: return@processFastJsonResult origResult
                     belowChannels.add(toInsertIdx, listenChannel)
                 }
             }
             origResult
+        }
+
+        // 新版客户端的 fastjson 委托链中，各 parseObject 重载不再经过
+        // (String, Type, int, Feature[]) 四参方法，需同时覆盖三个入口：
+        // 缓存加载走 (String, Class)，网络解析走 (String, Type, Feature[])
+        instance.fastJsonClass?.hookMethod(
+            instance.fastJsonParse(),
+            String::class.java,
+            Type::class.java,
+            Int::class.javaPrimitiveType,
+            "com.alibaba.fastjson.parser.Feature[]"
+        ) { chain ->
+            processFastJsonResult(chain.proceed())
+        }
+
+        instance.fastJsonClass?.hookMethod(
+            instance.fastJsonParse(),
+            String::class.java,
+            Type::class.java,
+            "com.alibaba.fastjson.parser.Feature[]"
+        ) { chain ->
+            processFastJsonResult(chain.proceed())
+        }
+
+        instance.fastJsonClass?.hookMethod(
+            instance.fastJsonParse(),
+            String::class.java,
+            Class::class.java
+        ) { chain ->
+            processFastJsonResult(chain.proceed())
         }
 
         val searchRankClass = "com.bilibili.search.api.SearchRank".findClassOrNull(mClassLoader)
@@ -480,6 +524,337 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
             returnResult
         }
+
+        // 新版首页框架（khome）的底栏数据不走 fastjson TabResponse，
+        // 单独定位 hook；失败不影响上面的旧框架路径
+        runCatching { hookHomeFrameBottom() }.onFailure {
+            Log.e("hookHomeFrameBottom error: $it")
+        }
+        // 旧首页框架（TabHost）的底栏同样不再经过 fastjson 委托链，按
+        // Innocent_Lab 的方式直接 hook TabHost 单项绑定入口
+        runCatching { hookTabHostBottom() }.onFailure {
+            Log.e("hookTabHostBottom error: $it")
+        }
+        runCatching { hookSplashPurify() }.onFailure {
+            Log.e("hookSplashPurify error: $it")
+        }
+    }
+
+    // ---- 新版首页框架（khome）底栏 ----
+    // 8.92.1 起宿主同时带两套首页框架，新框架（平板/宽屏或服务端开关）由 Compose
+    // 按 HomeTabData（kotlinx 序列化）渲染底栏，不经过上面的 fastjson TabResponse，
+    // 旧框架仍走原路径，两条路径并存、任一框架生效即可。
+    // 定位不依赖混淆名（类名每版都变）：未混淆锚点 HomeFrameViewModel 的字段泛型
+    // 两跳内收集候选类，用 Companion.serializer() 的 serialName 精确比对（协议名
+    // R8 不改），再按 dex 字段排序规则（名字、再类型描述符）把元素名映射到字段。
+    private class HomeTabModel(
+        val dataClass: Class<*>,
+        val bottomField: Field,
+        val itemClass: Class<*>,
+        val nameField: Field,
+        val uriField: Field,
+        val tabIdField: Field,
+        val defaultSelectedField: Field
+    )
+
+    private fun hookHomeFrameBottom() {
+        val model = resolveHomeTabModel() ?: return
+        Log.d("startHook: HomeFrameBottom")
+        model.dataClass.hookAllConstructors { chain ->
+            chain.proceed()
+            val self = chain.thisObject ?: return@hookAllConstructors null
+            val bottom = runCatching { model.bottomField.get(self) as? List<*> }
+                .getOrNull() ?: return@hookAllConstructors null
+            bottomItems.clear()
+            val hides = sPrefs.getStringSet("hided_bottom_items", mutableSetOf())!!
+            val filtered = bottom.filter { item ->
+                if (item == null || !model.itemClass.isInstance(item))
+                    return@filter true
+                val name = model.nameField.get(item) as? String
+                val uri = model.uriField.get(item) as? String
+                val id = model.tabIdField.get(item) as? String
+                val showing = id !in hides
+                bottomItems.add(BottomItem(name, uri, id, showing))
+                // 服务端默认选中项（首页）删掉后宿主会失去初始页，强制保留
+                showing || runCatching {
+                    model.defaultSelectedField.getInt(item) != 0
+                }.getOrDefault(false)
+            }
+            if (filtered.size != bottom.size) {
+                runCatching { model.bottomField.set(self, filtered) }
+            }
+            null
+        }
+    }
+
+    private fun resolveHomeTabModel(): HomeTabModel? {
+        val viewModel = "tv.danmaku.bili.khome.vm.HomeFrameViewModel"
+            .findClassOrNull(mClassLoader) ?: return null
+        val serialization = HomeTabSerialization.load(mClassLoader) ?: return null
+        val dataClass = homeTabCandidateClasses(viewModel).firstOrNull { candidate ->
+            serialization.describe(candidate)?.serialName == HOME_TAB_DATA_SERIAL
+        } ?: return null
+        val dataShape = serialization.describe(dataClass) ?: return null
+        val dataFields = orderedInstanceFields(dataClass)
+        if (!matchesSerialDescriptor(dataClass, dataFields, dataShape)) return null
+        val bottomField = dataFields.getOrNull(dataShape.elements.indexOf("bottom"))
+            ?.takeIf { List::class.java.isAssignableFrom(it.type) } ?: return null
+        val itemClass = listItemClass(bottomField) ?: return null
+        val itemShape = serialization.describe(itemClass)
+            ?.takeIf { it.serialName == HOME_TAB_ITEM_SERIAL } ?: return null
+        val itemFields = orderedInstanceFields(itemClass)
+        if (!matchesSerialDescriptor(itemClass, itemFields, itemShape)) return null
+        fun itemField(element: String, type: Class<*>): Field? =
+            itemFields.getOrNull(itemShape.elements.indexOf(element))
+                ?.takeIf { it.type == type }
+        val nameField = itemField("name", String::class.java) ?: return null
+        val uriField = itemField("uri", String::class.java) ?: return null
+        val tabIdField = itemField("tab_id", String::class.java) ?: return null
+        // default_selected 是"默认选中项不得删除"保护的前提，读不到就整层放弃，
+        // 避免勾中的首页页签被静默删掉导致宿主失去初始页。
+        val defaultSelectedField = itemField(
+            "default_selected", Int::class.javaPrimitiveType!!
+        ) ?: return null
+        (dataFields + itemFields).forEach { it.isAccessible = true }
+        return HomeTabModel(
+            dataClass, bottomField, itemClass,
+            nameField, uriField, tabIdField, defaultSelectedField
+        )
+    }
+
+    /** ViewModel 字段泛型里出现的类，再加它们各自的实例字段类型（两跳）。 */
+    private fun homeTabCandidateClasses(viewModel: Class<*>): List<Class<*>> {
+        val first = LinkedHashSet<Class<*>>()
+        instanceFields(viewModel).forEach { collectGenericTypes(it.genericType, first, 0) }
+        val all = LinkedHashSet(first)
+        first.forEach { owner -> instanceFields(owner).forEach { all += it.type } }
+        return all.filter(::isHostAppClass)
+    }
+
+    private fun collectGenericTypes(type: Type, sink: MutableSet<Class<*>>, depth: Int) {
+        if (depth > MAX_GENERIC_DEPTH) return
+        when (type) {
+            is Class<*> -> sink += type
+            is ParameterizedType -> {
+                collectGenericTypes(type.rawType, sink, depth + 1)
+                type.actualTypeArguments.forEach { collectGenericTypes(it, sink, depth + 1) }
+            }
+            is WildcardType ->
+                type.upperBounds.forEach { collectGenericTypes(it, sink, depth + 1) }
+            is GenericArrayType ->
+                collectGenericTypes(type.genericComponentType, sink, depth + 1)
+        }
+    }
+
+    private fun isHostAppClass(type: Class<*>): Boolean =
+        !type.isPrimitive && !type.isArray && !type.isInterface &&
+            SKIPPED_PACKAGES.none { type.name.startsWith(it) }
+
+    private fun instanceFields(owner: Class<*>): List<Field> =
+        owner.declaredFields.filter { !Modifier.isStatic(it.modifiers) }
+
+    /**
+     * 按 dex field_ids 排序规则（字段名，其次类型描述符）重建声明顺序；
+     * Class.getDeclaredFields() 不承诺顺序，不能直接用。
+     */
+    private fun orderedInstanceFields(owner: Class<*>): List<Field> =
+        instanceFields(owner).sortedWith(compareBy({ it.name }, { descriptorOf(it.type) }))
+
+    private fun descriptorOf(type: Class<*>): String = when {
+        type.isArray -> "[" + descriptorOf(type.componentType!!)
+        type == Int::class.javaPrimitiveType -> "I"
+        type == Long::class.javaPrimitiveType -> "J"
+        type == Boolean::class.javaPrimitiveType -> "Z"
+        type == Byte::class.javaPrimitiveType -> "B"
+        type == Short::class.javaPrimitiveType -> "S"
+        type == Char::class.javaPrimitiveType -> "C"
+        type == Float::class.javaPrimitiveType -> "F"
+        type == Double::class.javaPrimitiveType -> "D"
+        type == Void.TYPE -> "V"
+        else -> "L" + type.name.replace('.', '/') + ";"
+    }
+
+    /**
+     * 字段数与元素数相同，且存在参数窗口与字段类型序列逐个相同的构造器
+     * （反序列化构造器 `(int seen, 元素…)` 或主构造器 `(元素…)`）。
+     */
+    private fun matchesSerialDescriptor(
+        owner: Class<*>,
+        fields: List<Field>,
+        shape: HomeTabSerialization.Shape
+    ): Boolean {
+        if (fields.size != shape.elements.size || fields.isEmpty()) return false
+        val types = fields.map { it.type }
+        return owner.declaredConstructors.any { constructor ->
+            val params = constructor.parameterTypes.toList()
+            params == types || (params.size >= types.size + 1 &&
+                params[0] == Int::class.javaPrimitiveType &&
+                params.subList(1, types.size + 1) == types)
+        }
+    }
+
+    private fun listItemClass(field: Field): Class<*>? =
+        ((field.genericType as? ParameterizedType)?.actualTypeArguments?.singleOrNull())
+            ?.let { argument ->
+                when (argument) {
+                    is Class<*> -> argument
+                    is WildcardType -> argument.upperBounds.singleOrNull() as? Class<*>
+                    else -> null
+                }
+            }
+
+    /** 只通过 kotlinx 公开接口读描述符；接口与访问器名不参与混淆。 */
+    private class HomeTabSerialization(
+        private val kSerializer: Class<*>,
+        private val getDescriptor: Method,
+        private val getSerialName: Method,
+        private val getElementsCount: Method,
+        private val getElementName: Method
+    ) {
+        class Shape(val serialName: String, val elements: List<String>)
+
+        fun describe(owner: Class<*>): Shape? = runCatching {
+            val companion = owner.declaredFields
+                .filter { Modifier.isStatic(it.modifiers) }
+                .firstNotNullOfOrNull { field ->
+                    val factory = field.type.declaredMethods.singleOrNull { method ->
+                        !Modifier.isStatic(method.modifiers) && method.parameterCount == 0 &&
+                            kSerializer.isAssignableFrom(method.returnType)
+                    } ?: return@firstNotNullOfOrNull null
+                    field.isAccessible = true
+                    factory.isAccessible = true
+                    field.get(null)?.let { factory.invoke(it) }
+                } ?: return@runCatching null
+            val descriptor = getDescriptor.invoke(companion) ?: return@runCatching null
+            val count = getElementsCount.invoke(descriptor) as Int
+            Shape(
+                serialName = getSerialName.invoke(descriptor) as String,
+                elements = (0 until count).map { getElementName.invoke(descriptor, it) as String }
+            )
+        }.getOrNull()
+
+        companion object {
+            fun load(loader: ClassLoader): HomeTabSerialization? {
+                val serializer = "kotlinx.serialization.KSerializer"
+                    .findClassOrNull(loader) ?: return null
+                val descriptor = "kotlinx.serialization.descriptors.SerialDescriptor"
+                    .findClassOrNull(loader) ?: return null
+                return runCatching {
+                    HomeTabSerialization(
+                        kSerializer = serializer,
+                        getDescriptor = serializer.getMethod("getDescriptor"),
+                        getSerialName = descriptor.getMethod("getSerialName"),
+                        getElementsCount = descriptor.getMethod("getElementsCount"),
+                        getElementName = descriptor.getMethod(
+                            "getElementName", Int::class.javaPrimitiveType
+                        )
+                    )
+                }.getOrNull()
+            }
+        }
+    }
+
+    // ---- 旧首页框架（TabHost）底栏 ----
+    // 参考 Innocent_Lab locateBottomBar/installTabHostLayer：TabHost 有唯一
+    // getTabs() 与唯一 (int, View) 绑定方法（新版混淆名为 q）；在绑定回调里读
+    // 全量条目，按值形状提取名称/路由/tab_id 填充 bottomItems，命中隐藏的条目
+    // 视图置 GONE。条目 String 字段无语义，按 dex 序（名字排序）为 名称/图标/
+    // 选中图标/id/tab_id/气泡路由/路由/换肤图标。
+    private fun hookTabHostBottom() {
+        val hostClass = BOTTOM_TAB_HOST_CLASSES.firstNotNullOfOrNull {
+            it.findClassOrNull(mClassLoader)
+        } ?: return
+        val tabsGetter = hostClass.methods.filter {
+            !Modifier.isStatic(it.modifiers) && it.name == "getTabs" &&
+                it.parameterCount == 0 && List::class.java.isAssignableFrom(it.returnType)
+        }.distinctBy(Method::toGenericString).singleOrNull() ?: return
+        val itemClass = (tabsGetter.genericReturnType as? ParameterizedType)
+            ?.actualTypeArguments?.singleOrNull() as? Class<*> ?: return
+        val bindMethod = hostClass.declaredMethods.singleOrNull {
+            !Modifier.isStatic(it.modifiers) && it.returnType == Void.TYPE &&
+                it.parameterTypes.contentEquals(
+                    arrayOf(Int::class.javaPrimitiveType, View::class.java)
+                )
+        } ?: return
+        // dex field_ids 按（名字、再类型描述符）排序，按名字排序即还原声明顺序
+        val stringFields = itemClass.declaredFields.filter {
+            !Modifier.isStatic(it.modifiers) && it.type == String::class.java
+        }.sortedBy { it.name }.onEach { it.isAccessible = true }
+        if (stringFields.isEmpty()) return
+        tabsGetter.isAccessible = true
+        Log.d("startHook: TabHostBottom")
+        bindMethod.hookMethod { chain ->
+            chain.proceed()
+            val host = chain.thisObject ?: return@hookMethod null
+            val view = chain.args.getOrNull(1) as? View ?: return@hookMethod null
+            val tabs = runCatching { tabsGetter.invoke(host) as? List<*> }.getOrNull()
+                ?.filter { it != null && itemClass.isInstance(it) }
+                ?: return@hookMethod null
+            val hides = sPrefs.getStringSet("hided_bottom_items", mutableSetOf())!!
+            bottomItems.clear()
+            val hiddenFlags = tabs.map { item ->
+                val strings = stringFields.mapNotNull { field ->
+                    runCatching { field.get(item) as? String }.getOrNull()
+                        ?.trim()?.takeIf(String::isNotEmpty)
+                }
+                // 第一个不含 :// 的短值是名称；排除 http/https/file（图标与换肤
+                // 资源）后最后一个含 :// 的值是路由；tab_id 取不含 :// 的最后
+                // 一个短值（dex 序上位于名称与 id 之后）
+                val name = strings.firstOrNull { !it.contains("://") && it.length <= 12 }
+                val uri = strings.lastOrNull { value ->
+                    value.contains("://") &&
+                        value.substringBefore("://").lowercase() !in NON_ROUTE_SCHEMES
+                }
+                val id = strings.lastOrNull { !it.contains("://") && it.length <= 32 }
+                    ?: name
+                val showing = id !in hides
+                bottomItems.add(BottomItem(name, uri, id, showing))
+                !showing
+            }
+            // 至少保留一个可见页签（与 Innocent_Lab canHide 同口径）
+            val hiddenCount = hiddenFlags.count { it }
+            if (hiddenCount == 0 || hiddenCount >= tabs.size) return@hookMethod null
+            val index = (chain.args.getOrNull(0) as? Number)?.toInt()
+                ?: return@hookMethod null
+            if (hiddenFlags.getOrNull(index) != true) return@hookMethod null
+            view.visibility = View.GONE
+            view.isClickable = false
+            view.isEnabled = false
+            view.alpha = 0f
+            null
+        }
+    }
+
+    // ---- 净化开屏页面（开屏广告）----
+    // 参考 Innocent_Lab SplashAdFeatureInstaller，两道互不知情的防线：
+    // 数据层 hook 开屏响应类的列表 getter 返回空表——不打在解析器上（fastjson/
+    // Gson/kotlinx 均可能），候选类名 8.84–9.x 均为明文；决策层把选片决策
+    // SplashOrder.isEmptyAd() 恒置 true，覆盖不经过列表 getter 的构造路径
+    // （品牌预加载、事件开屏、本地缓存恢复），该方法 8.98.0 起才有，旧版自然
+    // 降级为仅数据层。两道各自定位，互不拖累。
+    private fun hookSplashPurify() {
+        if (!sPrefs.getBoolean("purify_splash", false) ||
+            !sPrefs.getBoolean("hidden", false)
+        ) return
+        SPLASH_RESPONSE_CLASSES.forEach { className ->
+            val owner = className.findClassOrNull(mClassLoader) ?: return@forEach
+            owner.methods.filter {
+                !Modifier.isStatic(it.modifiers) && it.parameterCount == 0 &&
+                    it.name in SPLASH_LIST_GETTERS &&
+                    List::class.java.isAssignableFrom(it.returnType)
+            }.distinctBy(Method::toGenericString).forEach { getter ->
+                getter.hookMethod {
+                    // 调用方可能继续往返回列表里塞元素，必须给可变的空表
+                    ArrayList<Any>(0)
+                }
+            }
+        }
+        "tv.danmaku.bili.splash.ad.model.SplashOrder".findClassOrNull(mClassLoader)
+            ?.declaredMethods?.singleOrNull {
+                !Modifier.isStatic(it.modifiers) && it.name == "isEmptyAd" &&
+                    it.parameterCount == 0 &&
+                    it.returnType == Boolean::class.javaPrimitiveType
+            }?.hookMethod { true }
     }
 
     private fun configTab(data: Any?, tabClass: Class<*>?) {
