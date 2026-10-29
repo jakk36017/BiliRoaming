@@ -5,6 +5,7 @@ import android.widget.LinearLayout
 import io.github.libxposed.api.XposedInterface.HookHandle
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
+import java.lang.reflect.Method
 
 class AutoLikeHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private val likedVideos = HashSet<Long>()
@@ -32,19 +33,14 @@ class AutoLikeHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             val componentMap =
                 kingPositionComponent!!.getObjectFieldAs<Map<*, *>>(instance.componentMapField())
 
-            val likeComponentClass = componentMap.keys.filterNotNull().firstNotNullOfOrNull {
-                val componentClass = it.javaClass
-                componentClass.declaredFields.firstOrNull {
-                    it.type == Runnable::class.java
-                } ?: return@firstNotNullOfOrNull null
-                componentClass
-            } ?: return@hookAllConstructors null
+            val likeComponentClass = componentMap.keys.filterNotNull()
+                .map { it.javaClass }
+                .distinct()
+                .firstOrNull { rebindViewOf(it) != null }
+                ?: return@hookAllConstructors null
 
-            val rebindView = likeComponentClass.declaredMethods.firstOrNull {
-                it.returnType == Void.TYPE && it.parameterCount == 5
-                        && it.parameterTypes[0] == likeComponentClass
-                        && it.parameterTypes[4] == LinearLayout::class.java
-            } ?: return@hookAllConstructors null
+            val rebindView = rebindViewOf(likeComponentClass)
+                ?: return@hookAllConstructors null
 
             rebindView.hookMethod { p ->
                 val result = p.proceed()
@@ -104,6 +100,16 @@ class AutoLikeHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             performLike(chain.thisObject as View)
             result
         }
+    }
+
+    /**
+     * 点赞组件的重绘方法：静态方法，首参是组件自身，末参是包含点赞按钮的 LinearLayout。
+     * 新版点赞组件已不再持有 Runnable 字段，只能按方法签名识别。
+     */
+    private fun rebindViewOf(componentClass: Class<*>): Method? = componentClass.declaredMethods.firstOrNull {
+        it.returnType == Void.TYPE && it.parameterCount == 5
+                && it.parameterTypes[0] == componentClass
+                && it.parameterTypes[4] == LinearLayout::class.java
     }
 
     private fun performLike(root: View) {

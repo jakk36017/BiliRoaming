@@ -30,8 +30,10 @@
     <string name="main_category">解锁番剧限制</string>
     <string name="miscellaneous_category">杂项</string>
     <string name="setting_category">设置</string>
-    <string name="mini_program_title">去你大爷的小程序</string>
-    <string name="mini_program_summary">不再以小程序的方式分享到QQ或者微信（同时复制分享链接变为av号）</string>
+    <string name="mini_program_title">小程序卡片转为普通链接</string>
+    <string name="mini_program_summary">开启后，分享到微信或 QQ 时改用普通链接卡片，标题仅有应用名时补上视频标题。</string>
+    <string name="mini_program_tim_title">适配分享到TIM</string>
+    <string name="mini_program_tim_summary">开启后，即使只装了 TIM 也会在分享面板显示 QQ 分享入口</string>
     <string name="update_title">更新</string>
     <string name="update_summary">点击打开最新版下载地址</string>
     <string name="group_title">QQ频道</string>

@@ -358,6 +358,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             if (!supportPurifyShare) {
                 disablePreference("purify_share")
                 disablePreference("mini_program")
+                disablePreference("mini_program_tim")
             }
             if (!supportDownloadThread) {
                 disablePreference("custom_download_thread")
