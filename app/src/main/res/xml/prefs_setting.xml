@@ -410,10 +410,8 @@
             android:key="filter_comment"
             android:summary="@string/filter_comment_summary"
             android:title="@string/filter_comment_title" />
-        <MultiSelectListPreference
+        <Preference
             android:dependency="hidden"
-            android:entries="@array/tab_entries"
-            android:entryValues="@array/tab_values"
             android:key="customize_home_tab"
             android:summary="@string/customize_home_tab_summary"
             android:title="@string/customize_home_tab_title" />

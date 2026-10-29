@@ -128,6 +128,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             findPreference("custom_server")?.onPreferenceClickListener = this
             findPreference("test_upos")?.onPreferenceClickListener = this
             findPreference("customize_bottom_bar")?.onPreferenceClickListener = this
+            findPreference("customize_home_tab")?.onPreferenceClickListener = this
             findPreference("pref_export")?.onPreferenceClickListener = this
             findPreference("pref_import")?.onPreferenceClickListener = this
             findPreference("export_video")?.onPreferenceClickListener = this
@@ -210,6 +211,10 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
 
             "customize_bottom_bar" -> {
                 extra.addAll(JsonHook.bottomItems.mapNotNull { it.name })
+            }
+
+            "customize_home_tab" -> {
+                extra.addAll(JsonHook.homeTabItems.mapNotNull { it.name })
             }
 
             "customize_drawer" -> {
@@ -704,6 +709,40 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             return true
         }
 
+        private fun onCustomizeHomeTabClick(): Boolean {
+            AlertDialog.Builder(activity).apply {
+                val tabItems = JsonHook.homeTabItems
+                val keys = tabItems.map { it.key }.toHashSet()
+                sPrefs.getStringSet(JsonHook.HIDED_HOME_TAB_KEY, null)?.forEach {
+                    if (it.isEmpty() || keys.contains(it)) return@forEach
+                    tabItems.add(JsonHook.HomeTabItem("未知", null, null, it, false))
+                }
+                setTitle(XposedInit.moduleRes.getString(R.string.customize_home_tab_title))
+                setPositiveButton(android.R.string.ok) { _, _ ->
+                    val hideKeys = mutableSetOf<String>()
+                    tabItems.forEach {
+                        if (it.showing.not()) hideKeys.add(it.key)
+                    }
+                    sPrefs.edit()
+                        .putStringSet(JsonHook.HIDED_HOME_TAB_KEY, hideKeys).apply()
+                }
+                setNegativeButton(android.R.string.cancel, null)
+                val names = Array(tabItems.size) { i ->
+                    val item = tabItems[i]
+                    buildString {
+                        append(item.name ?: "未知")
+                        item.id?.let { append(" ($it)") }
+                        item.uri?.let { append(" ($it)") }
+                    }
+                }
+                val showings = BooleanArray(tabItems.size) { i -> tabItems[i].showing }
+                setMultiChoiceItems(names, showings) { _, which, isChecked ->
+                    tabItems[which].showing = isChecked
+                }
+            }.show()
+            return true
+        }
+
         private fun onPrefExportClick(): Boolean {
             val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             intent.type = "text/xml"
@@ -1033,6 +1072,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
             "custom_server" -> onCustomServerClick()
             "test_upos" -> onTestUposClick()
             "customize_bottom_bar" -> onCustomizeBottomBarClick()
+            "customize_home_tab" -> onCustomizeHomeTabClick()
             "pref_export" -> onPrefExportClick()
             "pref_import" -> onPrefImportClick()
             "export_video" -> onExportVideoClick()

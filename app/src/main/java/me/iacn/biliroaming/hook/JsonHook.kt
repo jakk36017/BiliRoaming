@@ -15,7 +15,9 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     companion object {
         val bottomItems = mutableListOf<BottomItem>()
         val drawerItems = mutableListOf<BottomItem>()
+        val homeTabItems = mutableListOf<HomeTabItem>()
 
+        const val HIDED_HOME_TAB_KEY = "hided_home_tab_items"
         private const val HOME_TAB_DATA_SERIAL = "tv.danmaku.bili.khomeapi.frame.HomeTabData"
         private const val HOME_TAB_ITEM_SERIAL = "tv.danmaku.bili.khomeapi.frame.HomeTabItemData"
         private const val MAX_GENERIC_DEPTH = 4
@@ -26,6 +28,15 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             "tv.danmaku.p9138bili.p9228ui.main2.widget.TabHost"
         )
         private val NON_ROUTE_SCHEMES = setOf("http", "https", "file")
+        private val WHITESPACE = Regex("\\s+")
+        private val LEGACY_HOME_FRAGMENT_CLASSES = listOf(
+            "tv.danmaku.bili.ui.main2.HomeFragmentV2",
+            "tv.danmaku.p9138bili.p9228ui.main2.HomeFragmentV2"
+        )
+        private val LEGACY_HOME_TAB_RESOURCE_CLASSES = listOf(
+            "tv.danmaku.bili.ui.main2.resource.z",
+            "tv.danmaku.p9138bili.p9228ui.main2.resource.z"
+        )
         private val SPLASH_RESPONSE_CLASSES = listOf(
             "tv.danmaku.bili.splash.ad.model.SplashListResponse",
             "tv.danmaku.bili.splash.ad.model.SplashShowResponse",
@@ -535,6 +546,14 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         runCatching { hookTabHostBottom() }.onFailure {
             Log.e("hookTabHostBottom error: $it")
         }
+        // 净化首页标签：新旧两套首页框架各装一层，参考 Innocent_Lab 的
+        // HomeTabFilterFeatureInstaller；不勾选任何标签时只扫描，供设置弹窗列出
+        runCatching { hookHomeFrameTabs() }.onFailure {
+            Log.e("hookHomeFrameTabs error: $it")
+        }
+        runCatching { hookLegacyHomeTabs() }.onFailure {
+            Log.e("hookLegacyHomeTabs error: $it")
+        }
         runCatching { hookSplashPurify() }.onFailure {
             Log.e("hookSplashPurify error: $it")
         }
@@ -550,15 +569,17 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private class HomeTabModel(
         val dataClass: Class<*>,
         val bottomField: Field,
+        val tabField: Field?,
         val itemClass: Class<*>,
         val nameField: Field,
         val uriField: Field,
+        val idField: Field?,
         val tabIdField: Field,
         val defaultSelectedField: Field
     )
 
     private fun hookHomeFrameBottom() {
-        val model = resolveHomeTabModel() ?: return
+        val model = resolveHomeFrameModel() ?: return
         Log.d("startHook: HomeFrameBottom")
         model.dataClass.hookAllConstructors { chain ->
             chain.proceed()
@@ -610,6 +631,14 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         val nameField = itemField("name", String::class.java) ?: return null
         val uriField = itemField("uri", String::class.java) ?: return null
         val tabIdField = itemField("tab_id", String::class.java) ?: return null
+        // 顶栏标签的净化键优先取 id（与旧框架资源的第一个 String 字段同源），
+        // 部分宿主没有该元素时回退到 uri/name
+        val idField = itemField("id", String::class.java)
+        // 顶栏 tab 与底栏 bottom 共用同一条目类型；缺失或类型不符时只装底栏
+        val tabField = dataFields.getOrNull(dataShape.elements.indexOf("tab"))
+            ?.takeIf {
+                List::class.java.isAssignableFrom(it.type) && listItemClass(it) == itemClass
+            }
         // default_selected 是"默认选中项不得删除"保护的前提，读不到就整层放弃，
         // 避免勾中的首页页签被静默删掉导致宿主失去初始页。
         val defaultSelectedField = itemField(
@@ -617,8 +646,8 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         ) ?: return null
         (dataFields + itemFields).forEach { it.isAccessible = true }
         return HomeTabModel(
-            dataClass, bottomField, itemClass,
-            nameField, uriField, tabIdField, defaultSelectedField
+            dataClass, bottomField, tabField, itemClass,
+            nameField, uriField, idField, tabIdField, defaultSelectedField
         )
     }
 
@@ -825,6 +854,128 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
     }
 
+    // ---- 净化首页标签 ----
+    // 参考 Innocent_Lab HomeTabFilterFeatureInstaller：新旧两套首页框架各一层，
+    // 条目都来自服务端同一份标签配置，净化键统一按 id → uri 生成，跨框架通用。
+    // 不勾选任何项时只扫描，设置弹窗（自定义底栏同款多选）据此列出标签元素。
+    private val homeTabDepth = ThreadLocal<IntArray>()
+    private var homeFrameModel: HomeTabModel? = null
+
+    /** 底栏与顶栏标签共用一次定位结果，避免重复扫描候选类。 */
+    private fun resolveHomeFrameModel(): HomeTabModel? =
+        homeFrameModel ?: resolveHomeTabModel()?.also { homeFrameModel = it }
+
+    private fun homeTabKey(id: String?, uri: String?): String? {
+        fun normalize(value: String) = value.trim().replace(WHITESPACE, " ")
+        return id?.takeIf { it.isNotBlank() }?.let { "id:${normalize(it)}" }
+            ?: uri?.takeIf { it.isNotBlank() }?.let { "uri:${normalize(it)}" }
+    }
+
+    /** 新首页框架（khome）：HomeTabData.tab 构造完成后剔除勾选的标签。 */
+    private fun hookHomeFrameTabs() {
+        val model = resolveHomeFrameModel() ?: return
+        val tabField = model.tabField ?: return
+        Log.d("startHook: HomeFrameTabs")
+        model.dataClass.hookAllConstructors { chain ->
+            // 默认参数构造器会嵌套委托给主构造器，只在最外层构造结束时处理一次，
+            // 此时字段已是最终值，也避免重复扫描覆盖快照
+            val counter = homeTabDepth.get() ?: IntArray(1).also { homeTabDepth.set(it) }
+            counter[0]++
+            try {
+                chain.proceed()
+            } finally {
+                counter[0]--
+            }
+            if (counter[0] == 0) {
+                runCatching { processHomeFrameTabs(model, tabField, chain.thisObject) }
+                    .onFailure { Log.e("processHomeFrameTabs error: $it") }
+            }
+            null
+        }
+    }
+
+    private fun processHomeFrameTabs(model: HomeTabModel, tabField: Field, self: Any?) {
+        if (self == null) return
+        val source = runCatching { tabField.get(self) as? List<*> }.getOrNull() ?: return
+        val hides = sPrefs.getStringSet(HIDED_HOME_TAB_KEY, emptySet())!!
+        homeTabItems.clear()
+        val filtered = source.filter { item ->
+            if (item == null || !model.itemClass.isInstance(item)) return@filter true
+            val name = runCatching { model.nameField.get(item) as? String }.getOrNull()
+            val uri = runCatching { model.uriField.get(item) as? String }.getOrNull()
+            val id = model.idField?.let {
+                runCatching { it.get(item) as? String }.getOrNull()
+            }
+            val key = homeTabKey(id, uri)
+            val showing = key == null || key !in hides
+            if (key != null) homeTabItems.add(HomeTabItem(name, uri, id, key, showing))
+            // 服务端默认选中项（推荐）删掉后宿主会失去初始页，强制保留
+            showing || runCatching {
+                model.defaultSelectedField.getInt(item) != 0
+            }.getOrDefault(false)
+        }
+        if (filtered.size != source.size) {
+            runCatching { tabField.set(self, filtered) }
+        }
+    }
+
+    /** 旧首页框架：HomeFragmentV2 的标签构建方法在交给宿主前过滤。 */
+    private fun hookLegacyHomeTabs() {
+        val build = LEGACY_HOME_FRAGMENT_CLASSES.asSequence()
+            .mapNotNull { it.findClassOrNull(mClassLoader) }
+            .flatMap { owner ->
+                owner.declaredMethods.filter {
+                    !Modifier.isStatic(it.modifiers) && !Modifier.isAbstract(it.modifiers) &&
+                        it.parameterCount == 1 &&
+                        List::class.java.isAssignableFrom(it.parameterTypes[0]) &&
+                        List::class.java.isAssignableFrom(it.returnType) &&
+                        it.genericParameterTypes.getOrNull(0)?.toString()
+                            ?.contains("main2.resource.") == true
+                }.asSequence()
+            }
+            .distinctBy(Method::toGenericString)
+            .singleOrNull() ?: return
+        val resourceClass = (build.genericParameterTypes[0] as? ParameterizedType)
+            ?.actualTypeArguments?.singleOrNull() as? Class<*>
+            ?: LEGACY_HOME_TAB_RESOURCE_CLASSES.firstNotNullOfOrNull {
+                it.findClassOrNull(mClassLoader)
+            }
+            ?: return
+        // 与 Innocent_Lab 同序：dex 字段序（此处同类型按名字排序）前三个 String
+        // 依次是 id、标题、uri，tab_id 在第四个字段
+        val stringFields = resourceClass.declaredFields.filter {
+            !Modifier.isStatic(it.modifiers) && it.type == String::class.java
+        }.sortedWith(compareBy({ it.name }, { descriptorOf(it.type) }))
+            .onEach { it.isAccessible = true }
+        if (stringFields.size < 3) return
+        val idField = stringFields[0]
+        val nameField = stringFields[1]
+        val uriField = stringFields[2]
+        build.isAccessible = true
+        Log.d("startHook: LegacyHomeTabs")
+        build.hookMethod { chain ->
+            val source = chain.args.getOrNull(0) as? List<*> ?: return@hookMethod chain.proceed()
+            val hides = sPrefs.getStringSet(HIDED_HOME_TAB_KEY, emptySet())!!
+            homeTabItems.clear()
+            val filtered = source.filter { item ->
+                if (item == null || !resourceClass.isInstance(item)) return@filter true
+                val id = runCatching { idField.get(item) as? String }.getOrNull()
+                val name = runCatching { nameField.get(item) as? String }.getOrNull()
+                val uri = runCatching { uriField.get(item) as? String }.getOrNull()
+                val key = homeTabKey(id, uri)
+                val showing = key == null || key !in hides
+                if (key != null) homeTabItems.add(HomeTabItem(name, uri, id, key, showing))
+                showing
+            }
+            // 全删光时原样放行（宿主拿到空列表会退回兜底配置），至少保留一个
+            if (filtered.size == source.size || filtered.isEmpty())
+                return@hookMethod chain.proceed()
+            val args = chain.args.toTypedArray()
+            args[0] = ArrayList(filtered)
+            chain.proceed(args)
+        }
+    }
+
     // ---- 净化开屏页面（开屏广告）----
     // 参考 Innocent_Lab SplashAdFeatureInstaller，两道互不知情的防线：
     // 数据层 hook 开屏响应类的列表 getter 返回空表——不打在解析器上（fastjson/
@@ -945,43 +1096,20 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 tab.add(koreaTW)
             }
         }
-
-        val purifytabset = sPrefs.getStringSet("customize_home_tab", emptySet())!!
-        if (purifytabset.isEmpty()) return
-        tab.removeAll {
-            when (it.getObjectFieldAs<String>("uri")) {
-                "bilibili://live/home"
-                -> purifytabset.contains("live")
-
-                "bilibili://pegasus/promo"
-                -> purifytabset.contains("promo")
-
-                "bilibili://pegasus/hottopic"
-                -> purifytabset.contains("hottopic")
-
-                "bilibili://pgc/bangumi_v2",
-                "bilibili://pgc/home",
-                "bilibili://following/home_activity_tab/6544"
-                -> purifytabset.contains("bangumi")
-
-                "bilibili://pgc/cinema_v2",
-                "bilibili://pgc/home?home_flow_type=2",
-                "bilibili://following/home_activity_tab/168644"
-                -> purifytabset.contains("movie")
-
-                "bilibili://following/home_activity_tab/95636",
-                "bilibili://following/home_activity_tab/163541"
-                -> purifytabset.contains("korea")
-
-                else -> purifytabset.contains("other_tabs")
-            }
-        }
     }
 
     data class BottomItem(
         val name: String?,
         val uri: String?,
         val id: String?,
+        var showing: Boolean
+    )
+
+    data class HomeTabItem(
+        val name: String?,
+        val uri: String?,
+        val id: String?,
+        val key: String,
         var showing: Boolean
     )
 }
