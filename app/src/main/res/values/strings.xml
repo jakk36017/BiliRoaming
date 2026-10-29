@@ -46,6 +46,8 @@
     <string name="purify_splash_summary">去除启动客户端时的推广</string>
     <string name="purify_pause_ad_title">净化暂停页广告</string>
     <string name="purify_pause_ad_summary">去除视频暂停时的广告倒计时与广告面板</string>
+    <string name="purify_game_mention_ad_title">净化视频提及的游戏广告</string>
+    <string name="purify_game_mention_ad_summary">隐藏视频详情页「视频提及」区域的游戏推广卡片</string>
     <string name="custom_splash_title">替换启动图</string>
     <string name="custom_splash_summary">替换启动图为自定义图片（仅支持6.6.0及以上版本，不选择图片则隐藏）</string>
     <string name="custom_splash_logo_title">替换启动Logo</string>
