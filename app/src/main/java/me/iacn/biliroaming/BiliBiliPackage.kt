@@ -26,7 +26,7 @@ import kotlin.math.max
 import kotlin.time.ExperimentalTime
 import kotlin.time.measureTimedValue
 
-
+//去除游戏中心右侧的游戏推荐轮播
 infix fun Configs.Class.from(cl: ClassLoader) = if (hasName()) name.findClassOrNull(cl) else null
 val Configs.Method.orNull get() = if (hasName()) name else null
 val Configs.Field.orNull get() = if (hasName()) name else null
@@ -127,6 +127,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     }
     val playerQualityServiceClass by Weak { "com.bilibili.playerbizcommon.features.quality.PlayerQualityService" from mClassLoader }
     val mossResponseHandlerClass by Weak { "com.bilibili.lib.moss.api.MossResponseHandler" from mClassLoader }
+    val mossExceptionClass by Weak { "com.bilibili.lib.moss.api.MossException" from mClassLoader }
     val projectionPlayUrlClass by Weak { "com.bilibili.lib.projection.internal.api.model.ProjectionPlayUrl" from mClassLoader }
     val responseBodyClass by Weak { mHookInfo.okHttp.responseBody.class_ from mClassLoader }
     val mediaTypeClass by Weak { mHookInfo.okHttp.mediaType.class_ from mClassLoader }

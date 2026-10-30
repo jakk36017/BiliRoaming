@@ -467,7 +467,13 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         handler.callMethod("onNext", newRes)
                         handler.callMethod("onCompleted")
                     } else {
-                        handler.callMethod("onError", null)
+                        instance.mossExceptionClass?.let { mossExceptionClass ->
+                            handler.callMethod(
+                                "onError",
+                                arrayOf<Class<*>>(mossExceptionClass),
+                                null
+                            )
+                        }
                     }
                 }
                 null

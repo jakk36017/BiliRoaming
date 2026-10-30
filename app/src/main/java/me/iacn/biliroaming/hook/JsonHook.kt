@@ -1006,6 +1006,20 @@ class JsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     it.parameterCount == 0 &&
                     it.returnType == Boolean::class.javaPrimitiveType
             }?.hookMethod { true }
+        // 展示层兜底：COLD/CALL_UP 源且非预加载时 SplashManager.b 会直接返回
+        // 启动早期（可能早于 hook 安装）选出的预选缓存订单，不经过上面两道
+        // 防线；拦截最终出口后 MainActivityV2/HotSplashActivity 拿到的订单
+        // 恒为 null，各调用方对 null 均有判空，不会创建开屏广告页
+        "tv.danmaku.bili.splash.ad.core.SplashManager".findClassOrNull(mClassLoader)
+            ?.declaredMethods?.filter {
+                Modifier.isStatic(it.modifiers) && it.name == "b" &&
+                    it.parameterCount == 2 &&
+                    it.parameterTypes[0] == Boolean::class.javaPrimitiveType &&
+                    it.parameterTypes[1].name ==
+                        "tv.danmaku.bili.splash.ad.model.SplashSource" &&
+                    it.returnType.name ==
+                        "tv.danmaku.bili.splash.ad.model.SplashOrder"
+            }?.forEach { it.hookMethod { null } }
     }
 
     private fun configTab(data: Any?, tabClass: Class<*>?) {
