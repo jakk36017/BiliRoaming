@@ -41,7 +41,9 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     private val mHookInfo: Configs.HookInfo = run {
         val (result, time) = measureTimedValue { readHookInfo(mContext) }
         Log.d("load hookinfo $time")
-        Log.d(result.copy { clearMapIds() }.print())
+        if (BuildConfig.DEBUG) {
+            Log.d(result.copy { clearMapIds() }.print())
+        }
         result
     }
     val bangumiApiResponseClass by Weak { mHookInfo.bangumiApiResponse from mClassLoader }
@@ -396,7 +398,10 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
 
     private fun readHookInfo(context: Context): Configs.HookInfo {
         val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
-        hookInfoFile.delete() // proto 结构变更，强制重扫
+        val cached = readCachedHookInfo(hookInfoFile)
+        if (cached != null && isCacheValid(cached, context)) {
+            return cached
+        }
         return initHookInfo(context).also {
             try {
                 FileOutputStream(hookInfoFile).use { o -> it.writeTo(o) }
@@ -404,6 +409,32 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                 Log.e(e)
             }
         }
+    }
+
+    private fun readCachedHookInfo(file: File): Configs.HookInfo? {
+        if (!file.exists()) return null
+        return try {
+            Configs.HookInfo.parseFrom(file.readBytes())
+        } catch (e: Exception) {
+            Log.e(e)
+            null
+        }
+    }
+
+    private fun isCacheValid(cached: Configs.HookInfo, context: Context): Boolean {
+        val clientVersionCode = getVersionCode(context.packageName)
+        val moduleVersionCode = BuildConfig.VERSION_CODE
+        val generation = getModuleGeneration(context)
+        val lastUpdateTime = max(
+            context.packageManager.getPackageInfo(currentContext.packageName, 0).lastUpdateTime,
+            runCatchingOrNull {
+                context.packageManager.getPackageInfo(BuildConfig.APPLICATION_ID, 0)
+            }?.lastUpdateTime ?: 0
+        )
+        return cached.clientVersionCode == clientVersionCode
+            && cached.moduleVersionCode == moduleVersionCode
+            && cached.generation == generation
+            && cached.lastUpdateTime == lastUpdateTime
     }
 
     companion object {

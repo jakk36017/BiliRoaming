@@ -54,7 +54,7 @@ class XposedInit : XposedModule() {
             when {
                 !processName.contains(":") -> {
                     if (shouldSaveLog) {
-                        startLog()
+                        Thread { startLog() }.start()
                     }
                     Log.d("BiliBili process launched ...")
                     Log.d("BiliRoaming version: ${BuildConfig.VERSION_NAME}(${BuildConfig.VERSION_CODE}) from $modulePath${if (isBuiltIn) "(BuiltIn)" else ""}")
@@ -137,6 +137,7 @@ class XposedInit : XposedModule() {
                     startHook { SkipVideoAd(classLoader) }
                     startHook { PauseAdHook(classLoader) }
                     startHook { GameMentionAdHook(classLoader) }
+                    startHook { GameCenterRecommendHook(classLoader) }
                     startHook { CouponAutoHook(classLoader) }
                 }
 

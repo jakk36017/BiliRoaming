@@ -6,7 +6,8 @@ import me.iacn.biliroaming.hook.kotlinx.KotlinxSplashListProcessor
 import me.iacn.biliroaming.hook.kotlinx.KotlinxSplashShowProcessor
 import me.iacn.biliroaming.utils.Log
 import me.iacn.biliroaming.utils.callMethodOrNull
-import me.iacn.biliroaming.utils.getObjectFieldAs
+import me.iacn.biliroaming.utils.callMethodOrNullAs
+import me.iacn.biliroaming.utils.getObjectFieldOrNullAs
 import me.iacn.biliroaming.utils.hookAllMethods
 
 class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
@@ -37,9 +38,9 @@ class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private fun dispatchResult(deserializer: Any?, result: Any?) {
         if (deserializer == null || result == null) return
 
-        val serialName = deserializer
-            .callMethodOrNull("getDescriptor")
-            ?.getObjectFieldAs<String>("serialName")
+        val descriptor = deserializer.callMethodOrNull("getDescriptor") ?: return
+        val serialName = descriptor.callMethodOrNullAs<String>("getSerialName")
+            ?: descriptor.getObjectFieldOrNullAs<String>("serialName")
             ?: return
 
         enabledProcessors[serialName]?.forEach { processor ->

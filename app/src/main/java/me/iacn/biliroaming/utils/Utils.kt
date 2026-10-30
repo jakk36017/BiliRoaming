@@ -1,9 +1,10 @@
 package me.iacn.biliroaming.utils
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.Resources
 import android.content.SharedPreferences
 import android.content.pm.PackageManager.GET_META_DATA
 import android.graphics.Bitmap
@@ -110,18 +111,6 @@ val currentContext: Context by lazy {
     val clazz = Class.forName("android.app.ActivityThread")
     clazz.getMethod("currentApplication").invoke(null) as Application
 }
-
-val currentActivity: Activity?
-    get() = try {
-        val clz = Class.forName("android.app.ActivityThread")
-        val at = clz.getMethod("currentActivityThread").invoke(null)
-        @Suppress("UNCHECKED_CAST")
-        val activities = at?.getObjectField("mActivities") as? Map<Any, Any> ?: return null
-        activities.values.firstNotNullOfOrNull { record ->
-            (record.getObjectField("activity") as? Activity)
-                ?.takeIf { !it.isFinishing && !it.isDestroyed }
-        }
-    } catch (_: Throwable) { null }
 
 val packageName: String by lazy { currentContext.packageName }
 
@@ -459,34 +448,20 @@ fun ListView.forceSetSelection(pos: Int, top: Int = 0) {
     setSelectionFromTop(pos, top)
 }
 
+class ModuleContext(base: Context) : ContextWrapper(base) {
+    override fun getResources(): Resources = XposedInit.moduleRes
+}
+
 fun Context.inflateLayout(
     @LayoutRes resource: Int,
     root: ViewGroup? = null,
     attachToRoot: Boolean = root != null
-): View = LayoutInflater.from(this).inflate(resource, root, attachToRoot)
+): View = LayoutInflater.from(this)
+    .cloneInContext(ModuleContext(this))
+    .inflate(resource, root, attachToRoot)
 
 fun Context.addModuleAssets() {
     resources.assets.callMethod("addAssetPath", XposedInit.modulePath)
-}
-
-@OptIn(ExperimentalStdlibApi::class)
-fun Any.dumpToString(): String {
-    val sb = StringBuilder()
-    sb.append("---- ${this.javaClass.name}@${this.hashCode().toHexString()} dump begin ----\n")
-    fun dumpClassFields(clazz: Class<*>) {
-        clazz.declaredFields.forEach { field ->
-            if (field.isStatic) return@forEach
-            field.isAccessible = true
-            val v = field.get(this)
-            sb.append("${field.name}: $v\n")
-        }
-        clazz.superclass?.let {
-            dumpClassFields(it)
-        }
-    }
-    dumpClassFields(this.javaClass)
-    sb.append("---- ${this.javaClass.name}@${this.hashCode().toHexString()} dump end ----")
-    return sb.toString()
 }
 
 fun Class<*>.findField(filter: (Field) -> Boolean): Field? {
