@@ -40,6 +40,12 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             "dy_opus_copy_right_id",
             "dy_opus_paragraph_text",
         )
+
+        // 「复制成功」toast 文本（动态复制操作后的默认提示）
+        private const val COPY_SUCCESS_TOAST = "复制成功"
+
+        // 「已复制该评论」toast 文本（评论三点菜单复制后的默认提示）
+        private const val COMMENT_COPIED_TOAST = "已复制该评论"
     }
 
     private val enhanceLongClickCopy = sPrefs.getBoolean("comment_copy_enhance", false)
@@ -50,6 +56,28 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
     @Volatile
     private var lastDescCopyPressAt = 0L
+
+    // 统一获取当前栈顶 Activity（原逻辑在多处重复内联）
+    private fun topActivity(): Activity? =
+        "com.bilibili.base.BiliContext".findClassOrNull(mClassLoader)
+            ?.callStaticMethodOrNull("topActivity") as? Activity
+
+    // 判断「复制成功」toast 是否来自被本模块拦截的复制操作：
+    //   - View 长按（onLongClick / performLongClick）
+    //   - 动态 Compose 长按（LongPressCopyGestureKt）
+    //   - 评论三点菜单复制（kntr.common.comment / CommentCardAllClick）
+    // 用于在剪贴板已被拦截后，吞掉随之而来的「复制成功」提示。
+    private fun shouldSuppressCopySuccessToast(str: String?): Boolean {
+        if (str != COPY_SUCCESS_TOAST && str != COMMENT_COPIED_TOAST) return false
+        val frames = Thread.currentThread().stackTrace
+        return frames.any {
+            (it.className != "android.view.View" && it.methodName == "onLongClick") ||
+                (it.className == "android.view.View" && it.methodName == "performLongClick") ||
+                it.className.contains("LongPressCopyGestureKt") ||
+                it.className.startsWith("kntr.common.comment") ||
+                it.className.contains("CommentCardAllClick")
+        }
+    }
 
     private fun cacheViewReply(reply: Any?) {
         val n = reply?.javaClass?.name ?: return
@@ -188,8 +216,7 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                                 }.getOrNull()?.takeIf { it.isNotBlank() }
                             }
                             ?: lambdaSelf?.callMethodOrNullAs<String>("a")
-                        val activity = "com.bilibili.base.BiliContext".findClassOrNull(mClassLoader)
-                            ?.callStaticMethodOrNull("topActivity") as? Activity
+                        val activity = topActivity()
                         if (!text.isNullOrBlank() && activity != null) {
                             showCopyDialog(activity, text)
                             return@hookMethod null
@@ -244,7 +271,21 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         it.endsWith(".onLongClick") && !it.startsWith("android.view.View")
                     } && stackFrames.any { it.startsWith("android.view.View.performLongClick") }
 
-                    if ((isIM && !isCommentOrDesc) || isDynListLongClick) {
+                    // 动态（列表/详情）Compose 长按自由复制：LongPressCopyGestureKt 的 $onCopy lambda
+                    // 里调用 kg1/c.a(String) 写入剪贴板。详情页 lambda 是 H（文本嵌在模型 i.d 中），
+                    // 列表页是 B（文本通过 Kb1/b.a() 获取），entry hook 无法直接从 lambda 字段取到文本，
+                    // 因此在此通过调用栈含 LongPressCopyGestureKt 识别并拦截剪贴板写入。
+                    val isDynLongPressCopy = stackFrames.any { it.contains("LongPressCopyGestureKt") }
+
+                    // 评论三点菜单复制兜底：CopyCommentHook 通过 Pos.COPY 字段扫描定位复制 lambda，
+                    // 若未来版本 lambda 迁移/扫描失败导致 hook 未安装，lambda 会正常执行并写入剪贴板。
+                    // 此处作为兜底在剪贴板层拦截——与 lambda hook 天然互斥（hook 命中 return null 阻断，
+                    // 不会走到 setPrimaryClip）。入口类落在 kntr.common.comment 或栈含 CommentCardAllClick
+                    // （评论 action 分发的 sealed class 名，非混淆）。
+                    val isCommentMenuCopy = entryClass.startsWith("kntr.common.comment") ||
+                        stackFrames.any { it.contains("CommentCardAllClick") }
+
+                    if ((isIM && !isCommentOrDesc) || isDynListLongClick || isDynLongPressCopy || isCommentMenuCopy) {
                         val arg0 = chain.args.getOrNull(0)
                         val text: String? = when (arg0) {
                             is android.content.ClipData -> (0 until arg0.itemCount).joinToString("\n") { i ->
@@ -254,8 +295,7 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                             else -> null
                         }
                         if (!text.isNullOrEmpty()) {
-                            val activity = "com.bilibili.base.BiliContext".findClassOrNull(mClassLoader)
-                                ?.callStaticMethodOrNull("topActivity") as? Activity
+                            val activity = topActivity()
                             if (activity != null) {
                                 showCopyDialog(activity, text)
                                 return@hookMethod null
@@ -267,24 +307,42 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
         }.onFailure { Log.e("CopyHook[IM] hook failed: ${it.message}") }
 
-        // === 动态列表页：吞掉长按复制后的「复制成功」toast ===
-        // 剪贴板写入已在上面拦截，但 SS.u.onLongClick 会继续走 ToastHelper.showToastShort("复制成功")。
-        // ToastHelper 非混淆类名稳定；双重条件（文本 + onLongClick 调用栈）避免误伤其他场景的同名 toast。
+        // === 吞掉复制操作后的「复制成功」toast ===
+        // 剪贴板写入已在上面拦截，但原代码会继续弹 toast。
+        // 覆盖两条 toast 通道：ToastHelper（动态列表页 View 长按、评论三点菜单）
+        // 与 kntr Toaster（动态详情页 Compose 长按、评论三点菜单新版）。
+        // 统一用 shouldSuppressCopySuccessToast 判断调用栈，避免误伤其他场景的同名 toast。
         runCatching {
             val toastHelper = "com.bilibili.droid.ToastHelper".findClassOrNull(mClassLoader)
                 ?: return@runCatching
             listOf("showToastShort", "showToastLong", "showToast").forEach { name ->
                 toastHelper.hookAllMethods(name) { chain ->
                     val str = chain.args.filterIsInstance<String>().firstOrNull()
-                    if (str != "复制成功") return@hookAllMethods chain.proceed()
-                    val frames = Thread.currentThread().stackTrace
-                    val fromLongClick = frames.any {
-                        it.className != "android.view.View" && it.methodName == "onLongClick"
-                    } || frames.any { it.className == "android.view.View" && it.methodName == "performLongClick" }
-                    if (fromLongClick) null else chain.proceed()
+                    if (shouldSuppressCopySuccessToast(str)) null else chain.proceed()
                 }
             }
         }.onFailure { Log.e("CopyHook toast hook failed: ${it.message}") }
+
+        // Compose Toaster 通道（详情页 H lambda / 评论新版菜单均使用）
+        // 只 hook 默认实现 Vm1/a；Toaster 是接口，hook 抽象方法会抛异常（日志 460 行），故不再尝试。
+        runCatching {
+            val suppressToast: (XposedInterface.Chain) -> Any? = { chain ->
+                val str = chain.args.filterIsInstance<String>().firstOrNull()
+                if (shouldSuppressCopySuccessToast(str)) null else chain.proceed()
+            }
+            "Vm1.a".findClassOrNull(mClassLoader)?.hookAllMethods("showToast", suppressToast)
+        }.onFailure { Log.e("CopyHook toaster hook failed: ${it.message}") }
+
+        // 评论三点菜单复制的「已复制该评论」toast 走 ToastV3 通道：BToastV3.show(Context, String, II)
+        // （日志 5492 行 RawToastHandler toast show:已复制该评论）。BToastV3 为非混淆类，
+        // newbilibili / oldbilibili 版本类名一致，是稳定的跨版本 hook 点，文本在 args[1]。
+        runCatching {
+            "com.bilibili.droid.toast.BToastV3".findClassOrNull(mClassLoader)
+                ?.hookAllMethods("show") { chain ->
+                    val str = chain.args.filterIsInstance<String>().firstOrNull()
+                    if (shouldSuppressCopySuccessToast(str)) null else chain.proceed()
+                }
+        }.onFailure { Log.e("CopyHook BToastV3 hook failed: ${it.message}") }
 
         // === 简介长按自由复制：hook 全部 descCopyPress 目标，拦截剪贴板写入 ===
         runCatching {
@@ -300,9 +358,7 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     // 文本取 args 中的 String 参数（兼容 (String, boolean) 与 (boolean, String)）
                     val text = chain.args.filterIsInstance<String>().firstOrNull()
                         ?: return@hookAllMethods null
-                    val activity = "com.bilibili.base.BiliContext".findClassOrNull(mClassLoader)
-                        ?.callStaticMethodOrNull("topActivity") as? Activity
-                        ?: return@hookAllMethods null
+                    val activity = topActivity() ?: return@hookAllMethods null
                     lastDescCopyPressAt = now
                     showDescCopyDialog(activity, text)
                     null // 不调 proceed()，拦截原剪贴板写入
@@ -326,8 +382,7 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 ) return@hookAllMethods chain.proceed()
                 if (!enhanceLongClickCopy) return@hookAllMethods true
                 val text = extractRawTextFromInteraction(arg)
-                val activity = "com.bilibili.base.BiliContext".findClassOrNull(mClassLoader)
-                    ?.callStaticMethodOrNull("topActivity") as? Activity
+                val activity = topActivity()
                 if (!text.isNullOrEmpty() && activity != null) {
                     showCopyDialog(activity, text)
                     return@hookAllMethods true

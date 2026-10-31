@@ -1742,24 +1742,32 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                         }
                     }
             } ?: Log.e("commentMoreMenuInteract: scan crashed")
-            // 评论三点菜单复制：COPY 枚举字段引用扫描定位 D0.invoke
+            // 评论三点菜单复制：COPY 枚举字段引用扫描定位复制 lambda
+            // 旧版位于 kntr.common.comment.page.ui（D0.invoke），新版移到了其它包（如 jR0/Q.invoke），
+            // 因此不能限定包前缀，否则新版扫不到。
             runCatchingOrNull {
                 commentMoreMenuCopy = comment3Copy {
                     val posClass =
                         "kntr.common.comment.card.action.CardReportAction\$CommentCardAllClick\$Pos"
                             .findClassOrNull(classloader)
+                    val posClassName = posClass?.name
                     val copyField = posClass?.runCatchingOrNull { getField("COPY") }
-                    if (copyField != null) {
+                    if (copyField != null && posClassName != null) {
                         val fieldIndex = dexHelper.encodeFieldIndex(copyField)
-                        dexHelper.findMethodGettingField(
+                        val candidates = dexHelper.findMethodGettingField(
                             fieldIndex, -1, -1, null, -1, null, null, null, false
                         ).asSequence()
                             .mapNotNull { dexHelper.decodeMethodIndex(it) }
-                            .filter { it.declaringClass.name.startsWith("kntr.common.comment.page.ui.") }
-                            .firstOrNull()?.let {
-                                class_ = class_ { name = it.declaringClass.name }
-                                method = method { name = it.name }
-                            }
+                            .filter { it.declaringClass.name != posClassName }
+                            .toList()
+                        // 旧版优先 page.ui 下的复制 lambda，新版回退到其它包（如 jR0/Q）
+                        val target = candidates.firstOrNull {
+                            it.declaringClass.name.startsWith("kntr.common.comment.page.ui.")
+                        } ?: candidates.firstOrNull()
+                        target?.let {
+                            class_ = class_ { name = it.declaringClass.name }
+                            method = method { name = it.name }
+                        }
                     }
                 }
             } ?: Log.e("commentMoreMenuCopy: scan crashed")
