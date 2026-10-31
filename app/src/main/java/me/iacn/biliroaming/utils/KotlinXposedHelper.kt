@@ -136,13 +136,65 @@ private fun findConstructorBestMatch(clazz: Class<*>, argTypes: Array<Class<*>>)
     null
 }
 
+/**
+ * 记录「异常是否来自原方法」的 Chain 包装。
+ *
+ * 原方法自身抛异常（例如客户端解析失败）属于正常业务路径，不应被当成 hooker 出错：
+ * 既要原样抛回调用方，也不能再次 proceed（会重复执行原方法）。
+ */
+@PublishedApi
+internal class OriginalExceptionTrackingChain(
+    private val delegate: XposedInterface.Chain
+) : XposedInterface.Chain {
+    var thrownByOriginal: Throwable? = null
+        private set
+
+    override fun getExecutable() = delegate.executable
+    override fun getThisObject() = delegate.thisObject
+    override fun getArgs() = delegate.args
+    override fun getArg(index: Int) = delegate.getArg(index)
+
+    override fun proceed(): Any? = try {
+        delegate.proceed()
+    } catch (t: Throwable) {
+        thrownByOriginal = t
+        throw t
+    }
+
+    override fun proceed(args: Array<Any?>): Any? = try {
+        delegate.proceed(args)
+    } catch (t: Throwable) {
+        thrownByOriginal = t
+        throw t
+    }
+
+    override fun proceedWith(result: Any): Any? = try {
+        delegate.proceedWith(result)
+    } catch (t: Throwable) {
+        thrownByOriginal = t
+        throw t
+    }
+
+    override fun proceedWith(result: Any, args: Array<out Any?>): Any? = try {
+        delegate.proceedWith(result, args)
+    } catch (t: Throwable) {
+        thrownByOriginal = t
+        throw t
+    }
+}
+
 @PublishedApi internal inline fun createHooker(crossinline callback: HookCallback) = object : XposedInterface.Hooker {
-    override fun intercept(chain: XposedInterface.Chain): Any? = try {
-        callback(chain)
-    } catch (e: Throwable) {
-        Log.e("Error occurred calling hooker on ${chain.executable}")
-        Log.e(e)
-        chain.proceed()
+    override fun intercept(chain: XposedInterface.Chain): Any? {
+        val trackedChain = OriginalExceptionTrackingChain(chain)
+        return try {
+            callback(trackedChain)
+        } catch (e: Throwable) {
+            // 原方法抛出的异常：原样抛回，不记 hooker 错误、不重复调用
+            trackedChain.thrownByOriginal?.let { throw it }
+            Log.e("Error occurred calling hooker on ${chain.executable}")
+            Log.e(e)
+            chain.proceed()
+        }
     }
 }
 

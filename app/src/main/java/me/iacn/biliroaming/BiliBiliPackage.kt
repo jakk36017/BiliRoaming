@@ -181,8 +181,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     val liveRTCSourceServiceImplClass by Weak { mHookInfo.liveQuality.sourceService.class_ from mClassLoader }
     val defaultRequestInterceptClass by Weak { mHookInfo.liveQuality.interceptor.class_ from mClassLoader }
     val httpUrlClass by Weak { mHookInfo.okHttp.httpUrl.class_ from mClassLoader }
-    val preBuiltConfigClass by Weak { mHookInfo.preBuiltConfig.class_ from mClassLoader }
-    val dataSPClass by Weak { mHookInfo.dataSP.class_ from mClassLoader }
     val fastjsonFieldAnnotation by Weak { "com.alibaba.fastjson.annotation.JSONField" from mClassLoader }
     val gsonFieldAnnotation by Weak { "com.google.gson.annotations.SerializedName" from mClassLoader }
     val pegasusParserClass by Weak { mHookInfo.pegasusParser from mClassLoader }
@@ -383,10 +381,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     fun interceptMethod() = mHookInfo.liveQuality.interceptor.intercept.orNull
 
     fun httpUrlParseMethod() = mHookInfo.okHttp.httpUrl.parse.orNull
-
-    fun getPreBuiltConfigMethod() = mHookInfo.preBuiltConfig.get.orNull
-
-    fun getDataSPMethod() = mHookInfo.dataSP.get.orNull
 
     fun buildCommonResolverParamsMethod() =
         mHookInfo.resolveClientCompanion.buildCommonResolverParams.orNull
@@ -2452,56 +2446,6 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                     class_ = class_ { name = interceptorClass.name }
                     intercept = method { name = interceptMethod.name }
                 }
-            }
-            preBuiltConfig = preBuiltConfig {
-                val getMap = dexHelper.findMethodUsingString(
-                    "/config.json",
-                    false,
-                    -1,
-                    -1,
-                    null,
-                    -1,
-                    null,
-                    null,
-                    null,
-                    false
-                ).asSequence().mapNotNull { dexHelper.decodeMethodIndex(it) }
-                    .firstOrNull { it.declaringClass.name.contains("blconfig") }
-                    ?: return@preBuiltConfig
-                class_ = class_ { name = getMap.declaringClass.name }
-                get = method { name = getMap.name }
-            }
-            dataSP = dataSP {
-                val spxClass =
-                    ("com.bilibili.lib.blkv.SharedPrefX" from classloader) ?: return@dataSP
-                val blkvClass = ("com.bilibili.lib.blkv.BLKV" from classloader) ?: return@dataSP
-                val getBLSP = runCatchingOrNull {
-                    blkvClass.getDeclaredMethod(
-                        "getBLSharedPreferences",
-                        Context::class.java,
-                        File::class.java,
-                        Boolean::class.javaPrimitiveType,
-                        Int::class.javaPrimitiveType
-                    )
-                } ?: return@dataSP
-                val getDataSP = dexHelper.findMethodInvoked(
-                    dexHelper.encodeMethodIndex(getBLSP),
-                    dexHelper.encodeClassIndex(spxClass),
-                    -1,
-                    null,
-                    -1,
-                    null,
-                    null,
-                    null,
-                    false
-                ).asSequence().mapNotNull {
-                    dexHelper.decodeMethodIndex(it)
-                }.firstOrNull {
-                    Log.d(it)
-                    it.declaringClass.name.startsWith("com.bilibili.lib.blconfig.internal.TypedContext")
-                } ?: return@dataSP
-                class_ = class_ { name = getDataSP.declaringClass.name }
-                get = method { name = getDataSP.name }
             }
             pegasusParser = class_ {
                 val getPegasusParser = dexHelper.findMethodUsingString(

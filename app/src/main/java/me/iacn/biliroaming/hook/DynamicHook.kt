@@ -8,22 +8,16 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private val dynamicMossV1 by Weak { "com.bapis.bilibili.app.dynamic.v1.DynamicMoss" from mClassLoader }
     private val dynamicMossV2 by Weak { "com.bapis.bilibili.app.dynamic.v2.DynamicMoss" from mClassLoader }
 
-    private val purifyTypes = run {
-        sPrefs.getStringSet("customize_dynamic_type", null)
-            ?.map { it.toInt() }.orEmpty()
-    }
-    private val purifyContents = run {
+    private val purifyTypes = sPrefs.getStringSet("customize_dynamic_type", null)
+        ?.map { it.toInt() }.orEmpty()
+    private val purifyContents =
         sPrefs.getStringSet("customize_dynamic_keyword_content", null).orEmpty()
-    }
     private val purifyContentRegexes by lazy { purifyContents.map { it.toRegex() } }
     private val contentRegexMode = sPrefs.getBoolean("dynamic_content_regex_mode", false)
-    private val purifyUpNames = run {
+    private val purifyUpNames =
         sPrefs.getStringSet("customize_dynamic_keyword_upname", null).orEmpty()
-    }
-    private val purifyUidList = run {
-        sPrefs.getStringSet("customize_dynamic_keyword_uid", null)
-            ?.mapNotNull { it.toLongOrNull() }.orEmpty()
-    }
+    private val purifyUidList = sPrefs.getStringSet("customize_dynamic_keyword_uid", null)
+        ?.mapNotNull { it.toLongOrNull() }.orEmpty()
     private val removeTopicOfAll = sPrefs.getBoolean("customize_dynamic_all_rm_topic", false)
     private val removeUpOfAll = sPrefs.getBoolean("customize_dynamic_all_rm_up", false)
     private val removeLiveOfAll = sPrefs.getBoolean("customize_dynamic_all_rm_live", false)
@@ -47,7 +41,6 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 val args = chain.args.toTypedArray()
                 args[1] = args[1]!!.mossResponseHandlerProxy { reply ->
                     reply ?: return@mossResponseHandlerProxy
-                    Log.d("upList: ${reply.callMethod("getUpList")}")
                     if (removeTopicOfAll)
                         reply.callMethod("clearTopicList")
                     if (removeUpOfAll || removeLiveOfAll) {
@@ -69,6 +62,11 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                             }.onEachIndexed { index, item ->
                                 item.callMethod("setPos", index + 1L)
                             }
+                            Log.d(
+                                "upList: first=${firstList.size}, second=${secondList.size}, " +
+                                    "kept=${newItems.size}, removeUp=$removeUpOfAll, " +
+                                    "removeLive=$removeLiveOfAll"
+                            )
                             upList.callMethod("clearList")
                             upList.callMethod("clearListSecond")
                             upList.callMethod("addAllList", newItems)
@@ -106,12 +104,14 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             ) { chain ->
                 val args = chain.args.toTypedArray()
                 args[1] = args[1]!!.mossResponseHandlerReplaceProxy { reply ->
-                    reply?.callMethod("ensureScreenTabIsMutable")
-                    reply?.callMethodAs<MutableList<Any>>("getScreenTabList")?.map {
-                        it.callMethod(
-                            "setDefaultTab",
-                            it.callMethodAs<String>("getName") == "video"
-                        )
+                    reply?.apply {
+                        callMethod("ensureScreenTabIsMutable")
+                        callMethodAs<MutableList<Any>>("getScreenTabList")?.forEach {
+                            it.callMethod(
+                                "setDefaultTab",
+                                it.callMethodAs<String>("getName") == "video"
+                            )
+                        }
                     }
                     reply
                 }
@@ -163,46 +163,28 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     idxList.add(idx)
                     continue
                 }
-                val modulesText = moduleList.joinToString(separator = "") {
-                    it.callMethod("getModuleDesc")
-                        ?.callMethodAs<String>("getText").orEmpty()
-                }
-                if (modulesText.isNotEmpty() && if (contentRegexMode)
-                        purifyContentRegexes.any { modulesText.contains(it) }
-                    else purifyContents.any { modulesText.contains(it) }
-                ) {
-                    idxList.add(idx)
-                    continue
-                }
-            }
-
-            if (purifyContents.isNotEmpty()) {
-                val contentOrig = extend
-                    .callMethodAs<List<Any>>("getOrigDescList")
-                    .joinToString(separator = "") {
-                        it.callMethodAs<String>("getOrigText")
+                if (purifyContents.isNotEmpty()) {
+                    val modulesText = moduleList.joinToString(separator = "") {
+                        it.callMethod("getModuleDesc")
+                            ?.callMethodAs<String>("getText").orEmpty()
                     }
-                if (contentOrig.isNotEmpty() && if (contentRegexMode)
-                        purifyContentRegexes.any { contentOrig.contains(it) }
-                    else purifyContents.any { contentOrig.contains(it) }
-                ) {
-                    idxList.add(idx)
-                    continue
-                }
-            }
-
-            if (purifyContents.isNotEmpty()) {
-                val content = extend
-                    .callMethodAs<List<Any>>("getDescList")
-                    .joinToString(separator = "") {
-                        it.callMethodAs<String>("getOrigText")
+                    val contentOrig = extend
+                        .callMethodAs<List<Any>>("getOrigDescList")
+                        .joinToString(separator = "") {
+                            it.callMethodAs<String>("getOrigText")
+                        }
+                    val content = extend
+                        .callMethodAs<List<Any>>("getDescList")
+                        .joinToString(separator = "") {
+                            it.callMethodAs<String>("getOrigText")
+                        }
+                    if ((modulesText.isNotEmpty() && modulesText.matchesPurifyContent())
+                        || (contentOrig.isNotEmpty() && contentOrig.matchesPurifyContent())
+                        || (content.isNotEmpty() && content.matchesPurifyContent())
+                    ) {
+                        idxList.add(idx)
+                        continue
                     }
-                if (content.isNotEmpty() && if (contentRegexMode)
-                        purifyContentRegexes.any { content.contains(it) }
-                    else purifyContents.any { content.contains(it) }
-                ) {
-                    idxList.add(idx)
-                    continue
                 }
             }
 
@@ -226,4 +208,8 @@ class DynamicHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             contentList.removeAt(it)
         }
     }
+
+    private fun String.matchesPurifyContent(): Boolean =
+        if (contentRegexMode) purifyContentRegexes.any { contains(it) }
+        else purifyContents.any { contains(it) }
 }

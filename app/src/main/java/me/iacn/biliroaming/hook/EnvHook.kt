@@ -1,145 +1,55 @@
 package me.iacn.biliroaming.hook
 
-import android.content.SharedPreferences
-import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
-import java.lang.reflect.Proxy
+import java.lang.reflect.Modifier
 import java.util.regex.Pattern
 
 class EnvHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     override fun startHook() {
         Log.d("startHook: Env")
-
-        // EnvContext
-        instance.preBuiltConfigClass?.let {
-            val hooker: HookCallback = hooker@{ chain ->
-                val result = chain.proceed()
-                @Suppress("UNCHECKED_CAST")
-                val resultMap = result as? MutableMap<String, String?> ?: return@hooker result
-                for (config in configSet) {
-                    config.getEncryptedValue()?.let { resultMap[config.key] = it }
-                        ?: resultMap.remove(config.key)
-                }
-                result
-            }
-            // v8.28.0 - ? (instance method, no params)
-            it.hookMethod(instance.getPreBuiltConfigMethod(), callback = hooker)
-                // ? - v8.48.0 .. (static method, takes EnvContext param)
-                ?: it.hookMethod(instance.getPreBuiltConfigMethod(), it, callback = hooker)
-        }
-
-        // TypedContext
-        instance.dataSPClass?.let {
-            val hooker: HookCallback = hooker@{ chain ->
-                val raw = chain.proceed()
-                val result = raw as? SharedPreferences ?: return@hooker raw
-                // this indicates the proper instance
-                if (!result.contains("bv.enable_bv")) return@hooker raw
-                for (config in configSet) {
-                    config.getEncryptedValue()?.let {
-                        result.edit().putString(config.key, it).apply()
-                    } ?: result.edit().remove(config.key).apply()
-                }
-                raw
-            }
-            // v8.28.0 - ? (instance method, no params)
-            it.hookMethod(instance.getDataSPMethod(), callback = hooker)
-                // ? - v8.48.0 .. (static method, takes class param)
-                ?: it.hookMethod(instance.getDataSPMethod(), it, callback = hooker)
-        }
-
-        "com.bilibili.lib.blconfig.internal.OverrideConfig".findClassOrNull(mClassLoader)
-            ?.hookAllConstructors { chain ->
-                val delegate = chain.args.getOrNull(0) ?: return@hookAllConstructors chain.proceed()
-                val realConfig = chain.args.getOrNull(1) // may be null on 8.97.0+ (z12=true)
-                val delegateClass = delegate.javaClass
-                val args = chain.args.toTypedArray()
-                args[0] = Proxy.newProxyInstance(
-                    delegateClass.classLoader,
-                    delegateClass.interfaces
-                ) { _, m, a ->
-                    val proxyArgs = a ?: emptyArray()
-                    if (m.name == "getConfig") {
-                        var result: Any? = null
-                        val key = proxyArgs[0]
-                        for (config in configSet) {
-                            if (config.key == key) {
-                                result = if (realConfig != null) {
-                                    realConfig.callMethodOrNull("get", *proxyArgs)
-                                } else config.getPlainValue()
-                            }
-                        }
-                        result ?: m(delegate, *proxyArgs)
-                    } else {
-                        m(delegate, *proxyArgs)
-                    }
-                }
-                chain.proceed(args)
-            }
-
-//        // Disable tinker
-//        "com.tencent.tinker.loader.app.TinkerApplication".findClass(mClassLoader)?.hookAllConstructors { chain ->
-//            val args = chain.args.toTypedArray()
-//            args[0] = 0
-//            chain.proceed(args)
-//        }
     }
 
     override fun lateInitHook() {
         Log.d("lateHook: Env")
-        if (sPrefs.getBoolean("enable_av", false)) {
-            val compatClass = "com.bilibili.droid.BVCompat".findClassOrNull(mClassLoader)
-            compatClass?.declaredFields?.forEach { f ->
-                runCatchingOrNull {
-                    val field = compatClass.getStaticObjectField(f.name)
-                    if (field is Pattern && field.pattern() == "av[1-9]\\d*") {
-                        compatClass.setStaticObjectField(
-                            f.name,
-                            Pattern.compile("(av[1-9]\\d*)|(BV1[1-9A-NP-Za-km-z]{9})", field.flags())
-                        )
-                    }
-                }
-                if (f.type == Boolean::class.javaPrimitiveType) {
-                    runCatching {
-                        f.isAccessible = true
-                        f.setBoolean(null, false)
-                    }.onFailure { Log.e(it) }
+        if (!sPrefs.getBoolean("enable_av", false)) return
+        val compatClass = "com.bilibili.droid.BVCompat".findClassOrNull(mClassLoader) ?: return
+
+        // 显示侧唯一出口：static (avid, bvid) -> 实际展示的 ID。
+        // 按结构定位而不写死混淆名，候选不唯一时放弃，避免误 hook。
+        val chooser = compatClass.declaredMethods.singleOrNull {
+            Modifier.isStatic(it.modifiers) &&
+                it.returnType == String::class.java &&
+                it.parameterTypes.contentEquals(arrayOf(String::class.java, String::class.java))
+        }
+        if (chooser == null) {
+            Log.w("BVCompat chooser not found")
+        } else {
+            chooser.hookMethod { chain ->
+                val result = chain.proceed()
+                val current = result as? String ?: return@hookMethod result
+                if (!isBvId(current)) return@hookMethod result
+                // 只把真正的 BV 号换成另一个入参里的 AV 号，参数顺序变化也不会反向替换
+                chain.args.filterIsInstance<String>()
+                    .firstOrNull { it != current && it.isNotBlank() && !isBvId(it) }
+                    ?: return@hookMethod result
+            }
+        }
+
+        // 扩大文本识别正则，保证简介、评论里的 AV / BV 链接都还能点
+        compatClass.declaredFields.forEach { f ->
+            runCatching {
+                val field = compatClass.getStaticObjectField(f.name)
+                if (field is Pattern && field.pattern() == "av[1-9]\\d*") {
+                    compatClass.setStaticObjectField(
+                        f.name,
+                        Pattern.compile("(av[1-9]\\d*)|(BV1[1-9A-NP-Za-km-z]{9})", field.flags())
+                    )
                 }
             }
         }
     }
 
     companion object {
-
-        private val encryptedValueMap = hashMapOf(
-            "0" to "Irb5O7Q8Ka0ojD4qqScgqg==",
-            "1" to "Y260Cyvp6HZEboaGO+YGMw=="
-        )
-
-        class ConfigTuple(
-            val key: String,
-            val config: String,
-            val trueValue: String?,
-            val falseValue: String?,
-            val plainTrueValue: String? = null,
-            val plainFalseValue: String? = null
-        ) {
-            fun getEncryptedValue(): String? =
-                if (sPrefs.getBoolean(config, false)) trueValue else falseValue
-
-            fun getPlainValue(): String? =
-                if (sPrefs.getBoolean(config, false)) plainTrueValue else plainFalseValue
-        }
-
-        val configSet = listOf(
-            ConfigTuple(
-                "bv.enable_bv",
-                "enable_av",
-                encryptedValueMap["0"],
-                encryptedValueMap["1"],
-                "0",
-                "1"
-            ),
-        )
+        private fun isBvId(value: String) = value.length == 12 && value.startsWith("BV")
     }
 }

@@ -10,13 +10,11 @@ class KotlinxSplashListProcessor : KotlinxProcessor {
         sPrefs.getBoolean("hidden", false) && sPrefs.getBoolean("purify_splash", false)
 
     override fun process(result: Any) {
-        try {
-            result.javaClass.declaredFields
-                .filter { MutableList::class.java.isAssignableFrom(it.type) }
-                .forEach { field ->
-                    field.isAccessible = true
-                    (field.get(result) as? MutableList<*>)?.clear()
-                }
-        } catch (_: Throwable) {}
+        result.javaClass.declaredFields
+            .filter { MutableList::class.java.isAssignableFrom(it.type) }
+            .forEach { field ->
+                field.isAccessible = true
+                (field.get(result) as? MutableList<*>)?.clear()
+            }
     }
 }

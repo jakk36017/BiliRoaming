@@ -74,7 +74,16 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
 
         instance.playerCoreServiceV2Class?.apply {
-            hookMethod("G1", Int::class.java) { chain ->
+            // 状态回调在新版客户端由 G1 改名为 t，签名保持 void (int)。
+            // 按「返回类型 + 参数类型」校验候选，避免误命中同名的其它方法。
+            val stateMethod = declaredMethods.firstOrNull {
+                it.name in arrayOf("G1", "t") &&
+                    it.returnType == Void.TYPE &&
+                    it.parameterTypes.size == 1 &&
+                    it.parameterTypes[0] == Int::class.javaPrimitiveType
+            }
+            if (stateMethod == null) Log.w("SkipVideoAd: player state method not found")
+            stateMethod?.hookMethod { chain ->
                 val result = chain.proceed()
                 playerRef = WeakReference(chain.thisObject ?: return@hookMethod result)
                 val state = chain.args[0] as Int

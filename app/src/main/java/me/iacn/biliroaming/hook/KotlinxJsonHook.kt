@@ -1,29 +1,25 @@
 package me.iacn.biliroaming.hook
 
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
-import me.iacn.biliroaming.hook.kotlinx.KotlinxProcessor
 import me.iacn.biliroaming.hook.kotlinx.KotlinxSplashListProcessor
 import me.iacn.biliroaming.hook.kotlinx.KotlinxSplashShowProcessor
 import me.iacn.biliroaming.utils.Log
 import me.iacn.biliroaming.utils.callMethodOrNull
 import me.iacn.biliroaming.utils.callMethodOrNullAs
-import me.iacn.biliroaming.utils.getObjectFieldOrNullAs
 import me.iacn.biliroaming.utils.hookAllMethods
+import java.util.concurrent.ConcurrentHashMap
 
 class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
-    private val allProcessors = listOf(
+    private val processors = listOf(
         KotlinxSplashListProcessor(),
         KotlinxSplashShowProcessor(),
-    )
+    ).filter { it.shouldEnable() }
 
-    private val enabledProcessors: Map<String, List<KotlinxProcessor>> by lazy {
-        allProcessors
-            .filter { it.shouldEnable() }
-            .groupBy { it.targetSerialName }
-    }
+    // 序列化器的 serialName 固定不变，缓存后避免每次 decode 都重复反射
+    private val serialNameCache = ConcurrentHashMap<Any, String>()
 
     override fun startHook() {
-        if (enabledProcessors.isEmpty()) return
+        if (processors.isEmpty()) return
         Log.d("startHook: KotlinxJson")
 
         val jsonClass = instance.kotlinJsonClass ?: return
@@ -37,18 +33,20 @@ class KotlinxJsonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
     private fun dispatchResult(deserializer: Any?, result: Any?) {
         if (deserializer == null || result == null) return
-
-        val descriptor = deserializer.callMethodOrNull("getDescriptor") ?: return
-        val serialName = descriptor.callMethodOrNullAs<String>("getSerialName")
-            ?: descriptor.getObjectFieldOrNullAs<String>("serialName")
-            ?: return
-
-        enabledProcessors[serialName]?.forEach { processor ->
-            try {
-                processor.process(result)
-            } catch (e: Throwable) {
-                Log.e("KotlinxJsonHook processor ${processor.targetSerialName} error: $e")
-            }
+        val serialName = serialNameOf(deserializer) ?: return
+        val processor = processors.firstOrNull { it.targetSerialName == serialName } ?: return
+        try {
+            processor.process(result)
+        } catch (e: Throwable) {
+            Log.e("KotlinxJsonHook processor ${processor.targetSerialName} error: $e")
         }
     }
+
+    private fun serialNameOf(deserializer: Any): String? =
+        serialNameCache[deserializer] ?: run {
+            val name = deserializer.callMethodOrNull("getDescriptor")
+                ?.callMethodOrNullAs<String>("getSerialName") ?: return null
+            serialNameCache[deserializer] = name
+            name
+        }
 }
